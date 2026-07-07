@@ -1,0 +1,99 @@
+.hero {
+  position: relative;
+  min-height: 88vh;
+  display: flex;
+  align-items: center;
+  background: var(--bg);
+  overflow: hidden;
+  /* Clear the fixed nav so centered content isn't hidden behind it. */
+  padding-top: var(--nav-height);
+}
+
+/* Decorative backdrop layer — sits behind content, never intercepts clicks. */
+.backdrop {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Faint blue radial wash — the one documented decorative depth, kept subtle. */
+.wash {
+  position: absolute;
+  top: -20%;
+  right: -10%;
+  width: 70%;
+  height: 90%;
+  background: radial-gradient(
+    circle at 70% 30%,
+    rgba(15, 98, 254, 0.14),
+    rgba(15, 98, 254, 0) 60%
+  );
+}
+
+/* Inline contour-line motif, low opacity so it reads as texture, not art. */
+.contours {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.5;
+}
+
+.content {
+  position: relative;
+  z-index: 1;
+  max-width: 62rem;
+  padding-top: var(--space-xxl);
+  padding-bottom: var(--space-xxl);
+}
+
+.headline {
+  font: var(--type-display-xl);
+  letter-spacing: -0.5px;
+  color: var(--text-primary);
+  margin-top: var(--space-sm);
+  margin-bottom: var(--space-lg);
+  text-wrap: balance;
+}
+
+.accent {
+  color: var(--link);
+}
+
+.subhead {
+  font: var(--type-body-lg);
+  letter-spacing: 0.16px;
+  color: var(--text-secondary);
+  max-width: 44rem;
+  margin-bottom: var(--space-xl);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+}
+
+/* ≤672px (Carbon tablet/mobile): scale display type down, stack CTAs. */
+@media (max-width: 672px) {
+  .hero {
+    min-height: 80vh;
+  }
+
+  .headline {
+    font: var(--type-display-md);
+    font-size: 40px;
+    letter-spacing: -0.2px;
+  }
+
+  .subhead {
+    font: var(--type-body);
+    letter-spacing: 0.16px;
+  }
+
+  .actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

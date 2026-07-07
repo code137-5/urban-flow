@@ -1,0 +1,34 @@
+.container {
+  width: 100%;
+  max-width: var(--container-max);
+  margin: 0 auto;
+  padding-left: var(--space-xl);
+  padding-right: var(--space-xl);
+}
+
+.section {
+  padding-top: var(--space-section);
+  padding-bottom: var(--space-section);
+}
+
+.divided {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.eyebrow {
+  font: var(--type-body-sm);
+  letter-spacing: 0.16px;
+  color: var(--link);
+  margin-bottom: var(--space-md);
+}
+
+@media (max-width: 672px) {
+  .container {
+    padding-left: var(--space-md);
+    padding-right: var(--space-md);
+  }
+  .section {
+    padding-top: var(--space-xxl);
+    padding-bottom: var(--space-xxl);
+  }
+}

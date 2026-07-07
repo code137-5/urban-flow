@@ -1,0 +1,108 @@
+.intro {
+  max-width: 44rem;
+}
+
+.headline {
+  font: var(--type-display-md);
+  color: var(--text-primary);
+  margin-top: var(--space-xs);
+}
+
+.lead {
+  font: var(--type-body-lg);
+  color: var(--text-secondary);
+  margin-top: var(--space-lg);
+}
+
+/* ---- Pipeline ("어떻게 동작하나") ---- */
+.pipeline {
+  margin-top: var(--space-xxl);
+}
+
+.subhead {
+  font: var(--type-subhead);
+  color: var(--text-primary);
+  margin-bottom: var(--space-lg);
+}
+
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-lg);
+}
+
+.step {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: var(--space-md);
+}
+
+.stepNo {
+  display: block;
+  font: var(--type-body-sm);
+  letter-spacing: 0.16px;
+  color: var(--link);
+}
+
+.stepTitle {
+  font: var(--type-body-lg);
+  color: var(--text-primary);
+  margin-top: var(--space-xs);
+}
+
+.stepBody {
+  font: var(--type-body-sm);
+  letter-spacing: 0.16px;
+  color: var(--text-secondary);
+  margin-top: var(--space-sm);
+}
+
+/* ---- Dataset feature cards ---- */
+.datasets {
+  margin-top: var(--space-xxl);
+}
+
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-md);
+}
+
+.card {
+  background: var(--layer-01);
+  border: 1px solid var(--border-subtle);
+  padding: var(--space-lg);
+}
+
+.cardTitle {
+  font: var(--type-card-title);
+  color: var(--text-primary);
+}
+
+.cardBody {
+  font: var(--type-body-sm);
+  letter-spacing: 0.16px;
+  color: var(--text-secondary);
+  margin-top: var(--space-sm);
+}
+
+.cardMeta {
+  font: var(--type-caption);
+  letter-spacing: 0.32px;
+  color: var(--text-helper);
+  margin-top: var(--space-lg);
+}
+
+@media (max-width: 1056px) {
+  .steps {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 672px) {
+  .cardGrid {
+    grid-template-columns: 1fr;
+  }
+}

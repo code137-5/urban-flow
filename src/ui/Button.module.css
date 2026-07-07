@@ -1,0 +1,66 @@
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-xxl);
+  min-height: 48px; /* Carbon touch target */
+  padding: 12px 16px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-none);
+  font: var(--type-body-sm);
+  letter-spacing: 0.16px;
+  cursor: pointer;
+  transition: background 70ms ease, border-color 70ms ease, color 70ms ease;
+  text-decoration: none;
+  user-select: none;
+}
+.btn:hover {
+  text-decoration: none;
+}
+.trailing {
+  display: inline-flex;
+  margin-left: var(--space-md);
+}
+
+.primary {
+  background: var(--button-primary);
+  color: var(--text-on-color);
+}
+.primary:hover {
+  background: var(--button-primary-hover);
+  color: var(--text-on-color);
+}
+.primary:active {
+  background: var(--button-primary-active);
+}
+
+.secondary {
+  background: var(--layer-02);
+  color: var(--text-primary);
+}
+.secondary:hover {
+  background: var(--layer-03);
+  color: var(--text-primary);
+}
+
+.tertiary {
+  background: transparent;
+  border-color: var(--link);
+  color: var(--link);
+}
+.tertiary:hover {
+  background: rgba(120, 169, 255, 0.12);
+  color: var(--link-hover);
+  border-color: var(--link-hover);
+}
+
+.ghost {
+  background: transparent;
+  color: var(--link);
+  justify-content: flex-start;
+  gap: var(--space-md);
+}
+.ghost:hover {
+  background: var(--layer-01);
+  color: var(--link-hover);
+}

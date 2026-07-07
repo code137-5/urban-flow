@@ -1,0 +1,64 @@
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  height: var(--nav-height);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 100%;
+  max-width: var(--container-max);
+  margin: 0 auto;
+  padding: 0 var(--space-xl);
+}
+
+.wordmark {
+  font: var(--type-body-sm);
+  font-weight: 600;
+  letter-spacing: 0.16px;
+  color: var(--text-primary);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.wordmark:hover {
+  color: var(--text-primary);
+}
+
+.accent {
+  color: var(--link);
+}
+
+.links {
+  display: flex;
+  align-items: center;
+  gap: var(--space-lg);
+}
+
+.link {
+  font: var(--type-body-sm);
+  letter-spacing: 0.16px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: color 70ms ease;
+}
+.link:hover {
+  color: var(--link);
+}
+
+@media (max-width: 672px) {
+  .inner {
+    padding: 0 var(--space-md);
+  }
+  .links {
+    gap: var(--space-md);
+  }
+  /* Collapse secondary anchors; keep GitHub reachable as the sole affordance. */
+  .link[href^='#'] {
+    display: none;
+  }
+}
