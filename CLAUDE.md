@@ -31,7 +31,7 @@ Playwright (`npm i -D playwright && npx playwright install chromium`, then a sho
 Visualization pipeline: **data adapter → KDE heightmap → contour shader → GPU particles**,
 rendered by deck.gl. The whole pipeline depends only on the generic `GeoPoint` model
 (`src/data/types.ts`), never on dataset-specific fields — new datasets plug in as a
-`DataSource` adapter under `src/data/sources/`.
+`DataSource` adapter under `src/data/sources/` (dir added in P2).
 
 - `src/data/types.ts` — `GeoPoint`, `DataSource`, `DatasetId`, `Bounds`. The contract every
   layer depends on. Datasets are source-agnostic weighted geopoints (+ optional `weightByHour`
@@ -65,7 +65,8 @@ implementation source of truth. Rules that are easy to violate:
 
 ## Working style
 
-Build in incremental, **visually-verified** steps. Staged plan (P0 done → P6):
-P0 bootstrap · P1 landing shell (Hero/About/nav) · P2 data layer · P3 contour terrain ·
-P4 GPU particles · P5 comparison dashboard (1→2→3 panels) · P6 polish + deploy.
-Status: **P0–P1 done** (scaffold + landing shell verified). Next: **P2 data layer**.
+Build in incremental, **visually-verified** steps. Staged plan:
+- **P0** bootstrap · **P1** landing shell (Hero/About/nav) — ✅ done & verified
+- **P2** data layer · **P3** contour terrain · **P4** GPU particles · **P5** dashboard (1→2→3 panels) · **P6** polish + deploy
+
+Next: **P2 data layer**.
