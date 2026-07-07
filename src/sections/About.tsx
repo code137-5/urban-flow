@@ -16,36 +16,36 @@ interface Dataset {
 const STEPS: Step[] = [
   {
     no: '01',
-    title: '데이터 · 가중 지오포인트',
-    body: '출처가 다른 서울 데이터를 위치와 가중치를 가진 지오포인트로 통일합니다. 데이터 층은 원본 형식을 가리지 않습니다.',
+    title: 'Data · weighted geopoints',
+    body: 'Seoul data from different sources is unified into geopoints with a location and a weight. The data layer stays agnostic to the original format.',
   },
   {
     no: '02',
-    title: '등고선 지형 · KDE 하이트맵',
-    body: 'KDE로 밀도를 추정해 하이트맵을 만들고, 같은 밀도를 잇는 등고선으로 도시를 지형처럼 그립니다.',
+    title: 'Contour terrain · KDE heightmap',
+    body: 'Kernel density estimation builds a heightmap, and contour lines connecting equal density draw the city as if it were terrain.',
   },
   {
     no: '03',
-    title: 'GPU 파티클 흐름',
-    body: '지형의 경사를 따라 수천 개의 파티클이 GPU 위에서 실시간으로 흐르며 움직임의 방향과 세기를 드러냅니다.',
+    title: 'GPU particle flow',
+    body: 'Thousands of particles flow across the terrain in real time on the GPU, revealing the direction and intensity of the city’s movement.',
   },
 ]
 
 const DATASETS: Dataset[] = [
   {
-    title: '따릉이 (공공자전거)',
-    body: '서울 곳곳 대여소의 자전거 이용을 집계해 생활 반경과 근거리 이동 수요를 지형으로 그려 냅니다.',
-    unit: '단위 · 대여 건수',
+    title: 'Ttareungi (public bike)',
+    body: 'Bike usage across Seoul’s rental stations, aggregated to map everyday range and short-distance travel demand as terrain.',
+    unit: 'Unit · rentals',
   },
   {
-    title: '생활이동 (인구 OD)',
-    body: '지역과 지역 사이를 오가는 인구 흐름으로 도시의 출발지와 도착지 관계를 이어 봅니다.',
-    unit: '단위 · 이동 인구',
+    title: 'Living migration (population OD)',
+    body: 'Population flowing between districts, tracing the city’s origin-and-destination relationships.',
+    unit: 'Unit · people moved',
   },
   {
-    title: '지하철 승하차',
-    body: '역별 승차와 하차 인원으로 대중교통 거점의 혼잡과 시간대별 리듬을 포착합니다.',
-    unit: '단위 · 승하차 인원',
+    title: 'Subway ridership',
+    body: 'Boarding and alighting counts per station, capturing congestion at transit hubs and their rhythm across the day.',
+    unit: 'Unit · riders',
   },
 ]
 
@@ -55,20 +55,20 @@ export function About() {
     <Section id="about" divided>
       <Container>
         <div className={styles.intro}>
-          <Eyebrow>프로젝트 소개</Eyebrow>
+          <Eyebrow>About the project</Eyebrow>
           <h2 className={styles.headline}>
-            서울의 하루를 등고선 지형과 파티클 흐름으로 읽습니다
+            Reading Seoul’s day as contour terrain and particle flow
           </h2>
           <p className={styles.lead}>
-            Urban Flow는 서울의 공공 데이터를 등고선 지형으로 표현하고, 그 위를
-            흐르는 GPU 파티클로 도시의 움직임을 시각화합니다. 시간대별로 밀도가
-            어떻게 변하는지, 서로 다른 데이터셋이 어디에서 겹치고 갈라지는지 한
-            화면에서 비교할 수 있습니다.
+            Urban Flow renders Seoul’s public data as contour-line terrain and
+            visualizes the city’s movement with GPU particles flowing over it. See
+            how density shifts across the hours, and where different datasets
+            overlap or diverge — all compared on a single screen.
           </p>
         </div>
 
         <div className={styles.pipeline}>
-          <h3 className={styles.subhead}>어떻게 동작하나</h3>
+          <h3 className={styles.subhead}>How it works</h3>
           <ol className={styles.steps}>
             {STEPS.map((step) => (
               <li key={step.no} className={styles.step}>
@@ -81,7 +81,7 @@ export function About() {
         </div>
 
         <div className={styles.datasets}>
-          <h3 className={styles.subhead}>세 가지 데이터셋</h3>
+          <h3 className={styles.subhead}>Three datasets</h3>
           <div className={styles.cardGrid}>
             {DATASETS.map((dataset) => (
               <article key={dataset.title} className={styles.card}>

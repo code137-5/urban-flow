@@ -9,15 +9,15 @@ export function TopNav() {
   return (
     <header className={styles.nav}>
       <div className={styles.inner}>
-        <a className={styles.wordmark} href="#top" aria-label="Urban Flow — 맨 위로">
+        <a className={styles.wordmark} href="#top" aria-label="Urban Flow — back to top">
           Urban <span className={styles.accent}>Flow</span>
         </a>
-        <nav className={styles.links} aria-label="주요 메뉴">
+        <nav className={styles.links} aria-label="Primary">
           <a className={styles.link} href="#about">
-            소개
+            About
           </a>
           <a className={styles.link} href="#dashboard">
-            대시보드
+            Dashboard
           </a>
           <a
             className={styles.link}

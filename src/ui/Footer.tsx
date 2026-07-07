@@ -15,18 +15,18 @@ export function Footer() {
             Urban <span className={styles.accent}>Flow</span>
           </p>
           <p className={styles.tagline}>
-            서울의 지형과 흐름을 등고선과 입자로 시각화합니다.
+            Visualizing Seoul’s terrain and flow with contour lines and particles.
           </p>
         </div>
         <div className={styles.meta}>
-          <p className={styles.credit}>데이터 · 서울 열린데이터광장</p>
+          <p className={styles.credit}>Data · Seoul Open Data Plaza</p>
           <p className={styles.credit}>
             Based on{' '}
             <a className={styles.link} href={REPO_URL} target="_blank" rel="noreferrer">
               Aete/seoul-terrain-animation
             </a>
           </p>
-          <p className={styles.copyright}>© 2026 Urban Flow</p>
+          <p className={styles.copyright}>© 2026 Seunggyun Han</p>
         </div>
       </div>
     </footer>

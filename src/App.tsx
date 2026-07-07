@@ -9,9 +9,9 @@ function DashboardPlaceholder() {
   return (
     <Section id="dashboard" divided>
       <Container>
-        <Eyebrow>대시보드</Eyebrow>
+        <Eyebrow>Dashboard</Eyebrow>
         <h2 style={{ font: 'var(--type-display-md)', maxWidth: '18ch' }}>
-          데이터별 등고선과 파티클을 나란히 비교
+          Compare contours and particles side by side
         </h2>
         <p
           style={{
@@ -21,8 +21,8 @@ function DashboardPlaceholder() {
             maxWidth: '60ch',
           }}
         >
-          하나의 패널로 시작해 데이터셋을 추가하며 2개, 3개로 확장하는 인터랙티브
-          비교 대시보드가 이 자리에 들어갑니다. (준비 중)
+          An interactive comparison dashboard that starts with a single panel and
+          grows to two or three as you add datasets will live here. (Coming soon)
         </p>
       </Container>
     </Section>

@@ -59,25 +59,25 @@ export function Hero() {
 
       <Container>
         <div className={styles.content}>
-          <Eyebrow>Urban Flow</Eyebrow>
+          <Eyebrow>Seoul, read as terrain</Eyebrow>
 
           <h1 className={styles.headline}>
-            서울의 하루를 <span className={styles.accent}>등고선</span>과{' '}
-            흐르는 <span className={styles.accent}>파티클</span>로 읽다
+            Urban <span className={styles.accent}>Flow</span>
           </h1>
 
           <p className={styles.subhead}>
-            따릉이·생활이동·지하철 데이터를 지형처럼 쌓아 올린 등고선 위로, 도시의
-            움직임이 실시간 입자가 되어 흐릅니다. 서울이 숨 쉬는 방식을 한 화면에서
-            비교해 보세요.
+            Seoul's daily rhythm, rendered as contour-line terrain with GPU
+            particles flowing over it. Stack bike-share, population movement, and
+            subway data into a living landscape — and compare how the city breathes,
+            all on one screen.
           </p>
 
           <div className={styles.actions}>
             <Button variant="primary" href="#dashboard" trailing={<ArrowRight />}>
-              대시보드 살펴보기
+              Explore the dashboard
             </Button>
             <Button variant="tertiary" href="#about">
-              프로젝트 소개
+              About the project
             </Button>
           </div>
         </div>
