@@ -7,6 +7,8 @@ import ContourTerrainLayer from '../layers/ContourTerrainLayer'
 import { seoulBoundaryLayer } from '../layers/seoulBoundaryLayer'
 import { parkLayer, riverLayer } from '../layers/featureOverlays'
 import { ContourFallback } from './ContourFallback'
+import { terrainShaderSupported } from '../layers/terrainSupport'
+import { shaderErrors, type ShaderError } from '../webgl-compat'
 import type { DataSource, GeoPoint, Heightmap } from '../data/types'
 import styles from './Dashboard.module.css'
 
@@ -91,6 +93,21 @@ export function TerrainPanel({ source }: { source: DataSource }) {
   // If deck.gl can't initialize/compile on this device (some mobile GPUs), fall
   // back to a zero-WebGL SVG contour so the panel is never blank.
   const [webglFailed, setWebglFailed] = useState(false)
+  // Captured shader compile error (for on-screen diagnostics on mobile).
+  const [shaderError, setShaderError] = useState<ShaderError | null>(null)
+
+  // Probe support once; if it fails, skip deck.gl (avoids the shader-error
+  // overlay) and surface the driver's compile log on-screen.
+  useEffect(() => {
+    if (!terrainShaderSupported()) setWebglFailed(true)
+    if (shaderErrors.length) setShaderError(shaderErrors[shaderErrors.length - 1])
+    const onErr = (e: Event) => {
+      setShaderError((e as CustomEvent<ShaderError>).detail)
+      setWebglFailed(true)
+    }
+    window.addEventListener('uf-shader-error', onErr)
+    return () => window.removeEventListener('uf-shader-error', onErr)
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -184,7 +201,21 @@ export function TerrainPanel({ source }: { source: DataSource }) {
     ]
   }, [heightmap, controls, source.meta.id])
 
-  if (webglFailed) return <ContourFallback />
+  if (webglFailed) {
+    return (
+      <>
+        <ContourFallback />
+        {shaderError && (
+          <div className={styles.diag} role="status">
+            <p className={styles.diagTitle}>
+              WebGL terrain unavailable · {shaderError.stage} shader compile error
+            </p>
+            <pre className={styles.diagLog}>{shaderError.log.trim() || '(empty driver log)'}</pre>
+          </div>
+        )}
+      </>
+    )
+  }
 
   return (
     <>

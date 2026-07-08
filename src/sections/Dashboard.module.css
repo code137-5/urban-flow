@@ -100,6 +100,37 @@
   opacity: 0.85;
 }
 
+/* On-screen shader-compile diagnostics (mobile has no usable console). */
+.diag {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 70%;
+  overflow: auto;
+  padding: var(--space-md);
+  background: rgba(22, 22, 22, 0.92);
+  border-top: 1px solid var(--border-subtle);
+}
+
+.diagTitle {
+  font: var(--type-body-sm);
+  letter-spacing: 0.16px;
+  color: var(--support-warning);
+  margin-bottom: var(--space-xs);
+}
+
+.diagLog {
+  font: var(--type-caption);
+  font-family: var(--font-mono);
+  line-height: 1.4;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  margin: 0;
+}
+
 /* Shown while the KDE heightmap + Seoul mask build on first paint. */
 .loading {
   position: absolute;
