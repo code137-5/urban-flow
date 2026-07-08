@@ -5,6 +5,7 @@ import { INITIAL_VIEW_STATE, SEOUL_BOUNDS } from '../config'
 import { computeHeightmap } from '../data/field'
 import ContourTerrainLayer from '../layers/ContourTerrainLayer'
 import { seoulBoundaryLayer } from '../layers/seoulBoundaryLayer'
+import { parkLayer, riverLayer } from '../layers/featureOverlays'
 import type { DataSource, GeoPoint, Heightmap } from '../data/types'
 import styles from './Dashboard.module.css'
 
@@ -74,7 +75,11 @@ export function TerrainPanel({ source }: { source: DataSource }) {
   const layers = useMemo<Layer[]>(() => {
     if (!heightmap) return []
     return [
+      // Flat z=0 reference plate under the terrain: Seoul outline, then parks
+      // and river (muted so they don't compete with the contours).
       seoulBoundaryLayer({ lineColor: [82, 82, 82, 170], fillColor: [80, 80, 80, 18] }),
+      parkLayer(),
+      riverLayer(),
       new ContourTerrainLayer({
         id: `terrain-${source.meta.id}`,
         heightmap,
