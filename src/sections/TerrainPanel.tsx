@@ -6,6 +6,7 @@ import { computeHeightmap } from '../data/field'
 import ContourTerrainLayer from '../layers/ContourTerrainLayer'
 import { seoulBoundaryLayer } from '../layers/seoulBoundaryLayer'
 import { parkLayer, riverLayer } from '../layers/featureOverlays'
+import { ContourFallback } from './ContourFallback'
 import type { DataSource, GeoPoint, Heightmap } from '../data/types'
 import styles from './Dashboard.module.css'
 
@@ -87,6 +88,9 @@ export function TerrainPanel({ source }: { source: DataSource }) {
   const [points, setPoints] = useState<GeoPoint[] | null>(null)
   const [heightmap, setHeightmap] = useState<Heightmap | null>(null)
   const [controls, setControls] = useState<Controls>(DEFAULT_CONTROLS)
+  // If deck.gl can't initialize/compile on this device (some mobile GPUs), fall
+  // back to a zero-WebGL SVG contour so the panel is never blank.
+  const [webglFailed, setWebglFailed] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -180,6 +184,8 @@ export function TerrainPanel({ source }: { source: DataSource }) {
     ]
   }, [heightmap, controls, source.meta.id])
 
+  if (webglFailed) return <ContourFallback />
+
   return (
     <>
       <DeckGL
@@ -187,6 +193,12 @@ export function TerrainPanel({ source }: { source: DataSource }) {
         viewState={PANEL_VIEW_STATE}
         controller={false}
         layers={layers}
+        onError={(error) => {
+          // Shader compile/link or context failure on this device — degrade
+          // gracefully instead of leaving the panel blank.
+          console.warn('[urban-flow] deck.gl terrain failed; using SVG fallback:', error)
+          setWebglFailed(true)
+        }}
       />
       {!heightmap && (
         <div className={styles.loading} role="status">

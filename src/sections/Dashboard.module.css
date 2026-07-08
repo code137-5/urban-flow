@@ -91,6 +91,15 @@
   );
 }
 
+/* Zero-WebGL SVG contour shown if deck.gl fails to initialize on a device. */
+.fallback {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.85;
+}
+
 /* Shown while the KDE heightmap + Seoul mask build on first paint. */
 .loading {
   position: absolute;
