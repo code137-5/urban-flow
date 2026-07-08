@@ -13,7 +13,8 @@ Architecture is based on the experimental repo `Aete/seoul-terrain-animation` (r
 not forked — its data/heightmap/contour pipeline and shaders are the template; its particle
 system was never built, so we implement that ourselves).
 
-Page structure: **Hero → About (설명) → Dashboard**. UI copy is Korean; code identifiers English.
+Page structure: **Hero → About → Dashboard**. UI copy is English; code identifiers English.
+(Dataset names may keep their Korean originals in parentheses, e.g. "Ttareungi (public bike)".)
 
 ## Commands
 
@@ -58,10 +59,23 @@ implementation source of truth. Rules that are easy to violate:
   `--layer-02`) + 1px `--border-subtle` hairlines — **never drop shadows**.
 - **IBM Plex Sans / Plex Sans KR**, weight **300** for display sizes (42px+) — do not bold
   headlines. Body weight 400 with `letter-spacing: 0.16px`.
+  - **Exception:** the Hero "Urban Flow" wordmark headline (`src/sections/Hero.module.css`
+    `.headline`) is intentionally set to weight **700** — a deliberate departure from the
+    display-300 rule for the site's opening statement. It is the only bold display headline.
 - **One accent, IBM Blue.** On dark, links/interactive text use `--link` Blue 40 (`#78a9ff`);
   the primary button keeps Blue 60 (`#0f62fe`). No second brand color.
 - The visualization canvas sits directly on `--bg` `#161616` — one continuous dark surface
   with the site chrome.
+
+## Git / branching
+
+- **All work happens on a `features/<name>` branch** — never commit directly to `main` or
+  `deploy`. Use a short, kebab-case description, e.g. `features/hero-layout`,
+  `features/data-layer`. One branch per unit of work.
+- **`deploy`** is the production branch (Vercel deploys from it). **`main`** is the base
+  branch. Merge a `features/*` branch in only after it is visually verified.
+- Keep commits scoped and descriptive; push the feature branch, then fast-forward `deploy`
+  when the change is ready to ship.
 
 ## Working style
 
