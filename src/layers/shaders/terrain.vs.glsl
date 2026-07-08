@@ -1,24 +1,24 @@
 #version 300 es
 #define SHADER_NAME contour-terrain-vertex
 
-// Grid vertices in LNGLAT; z is displaced from the heightmap in the shader.
+// Grid vertices in LNGLAT; z is displaced from the baked height in the shader.
 in vec3 positions;
 in vec3 positions64Low;
-in vec2 texCoords;
 
-// Heightmap texel value: -1 = masked (outside Seoul / river), else [0,1].
-uniform sampler2D uHeightmap;
+// Per-vertex heightmap value: -1 = masked (outside Seoul / river), else [0,1].
+// Baked as an attribute (not a texture) so no vertex texture fetch is needed —
+// mobile GPUs often can't sample float textures in the vertex stage.
+in float heightVal;
 
 out float vHeight;
 out float vMask;
 
 void main(void) {
-  float h = texture(uHeightmap, texCoords).r;
-  vMask = step(0.0, h);
-  vHeight = max(h, 0.0);
+  vMask = step(0.0, heightVal);
+  vHeight = max(heightVal, 0.0);
 
   geometry.worldPosition = positions;
-  geometry.uv = texCoords;
+  geometry.uv = vec2(0.0);
 
   // z of the position is altitude in meters for the LNGLAT coordinate system.
   vec3 pos = vec3(positions.xy, vHeight * terrain.heightScale);

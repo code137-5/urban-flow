@@ -5,7 +5,6 @@ import type {
   UpdateParameters,
 } from '@deck.gl/core'
 import { Model } from '@luma.gl/engine'
-import type { Texture } from '@luma.gl/core'
 import type { Heightmap } from '../data/types'
 import { terrainUniforms } from './terrainUniforms'
 import vs from './shaders/terrain.vs.glsl'
@@ -36,31 +35,32 @@ const defaultProps: DefaultProps<ContourTerrainLayerProps> = {
 
 type GridMesh = {
   positions: Float64Array
-  texCoords: Float32Array
+  /** Per-vertex heightmap value (−1 = masked), baked as an attribute. */
+  heights: Float32Array
   indices: Uint32Array
   vertexCount: number
 }
 
-/** Build a cell-centered grid mesh (LNGLAT) matching the heightmap layout. */
+/**
+ * Build a cell-centered grid mesh (LNGLAT) matching the heightmap layout, with
+ * the height baked into a per-vertex attribute (NOT a texture — see class doc).
+ */
 function buildGridMesh(heightmap: Heightmap): GridMesh {
-  const { width: W, height: H, bounds } = heightmap
+  const { width: W, height: H, bounds, data } = heightmap
   const [minLng, minLat, maxLng, maxLat] = bounds
   const spanLng = maxLng - minLng
   const spanLat = maxLat - minLat
 
   const positions = new Float64Array(W * H * 3)
-  const texCoords = new Float32Array(W * H * 2)
+  const heights = new Float32Array(W * H)
   for (let j = 0; j < H; j++) {
-    const v = (j + 0.5) / H
-    const lat = minLat + v * spanLat
+    const lat = minLat + ((j + 0.5) / H) * spanLat
     for (let i = 0; i < W; i++) {
-      const u = (i + 0.5) / W
       const k = j * W + i
-      positions[k * 3] = minLng + u * spanLng
+      positions[k * 3] = minLng + ((i + 0.5) / W) * spanLng
       positions[k * 3 + 1] = lat
       positions[k * 3 + 2] = 0
-      texCoords[k * 2] = u
-      texCoords[k * 2 + 1] = v
+      heights[k] = data[k]
     }
   }
 
@@ -80,14 +80,20 @@ function buildGridMesh(heightmap: Heightmap): GridMesh {
       indices[t++] = c
     }
   }
-  return { positions, texCoords, indices, vertexCount: indices.length }
+  return { positions, heights, indices, vertexCount: indices.length }
 }
 
 /**
  * Renders a heightmap as a 3D contour surface: the grid mesh is displaced in the
  * vertex shader by height, and the fragment shader draws only contour lines
- * (fract, in height-interval units — no screen-space derivatives, for mobile
- * GLSL ES compatibility). Masked cells (−1) are discarded. Technique ported from
+ * (fract, in height-interval units — no screen-space derivatives). Masked cells
+ * (−1) are discarded.
+ *
+ * Height is supplied as a per-vertex ATTRIBUTE, not a sampled texture: vertex
+ * texture fetch of a float (r32float) texture is unsupported on many mobile
+ * GPUs and made the terrain shader fail to compile there while the (texture-less)
+ * base map layers rendered fine. Baking the height into the mesh removes VTF,
+ * the float texture, and the sampler entirely. Technique adapted from
  * Aete/seoul-terrain-animation.
  */
 export default class ContourTerrainLayer extends Layer<ContourTerrainLayerProps> {
@@ -96,7 +102,6 @@ export default class ContourTerrainLayer extends Layer<ContourTerrainLayerProps>
 
   declare state: {
     model?: Model
-    texture?: Texture
     mesh?: GridMesh
   }
 
@@ -120,9 +125,9 @@ export default class ContourTerrainLayer extends Layer<ContourTerrainLayerProps>
         update: (attr) => (attr.value = this.state.mesh!.positions),
         noAlloc: true,
       },
-      texCoords: {
-        size: 2,
-        update: (attr) => (attr.value = this.state.mesh!.texCoords),
+      heightVal: {
+        size: 1,
+        update: (attr) => (attr.value = this.state.mesh!.heights),
         noAlloc: true,
       },
     })
@@ -144,13 +149,12 @@ export default class ContourTerrainLayer extends Layer<ContourTerrainLayerProps>
       this.state.mesh = mesh
       this.state.model?.setVertexCount(mesh.vertexCount)
       attributeManager.invalidateAll()
-      this._updateTexture()
     }
   }
 
   draw() {
-    const { model, texture } = this.state
-    if (!model || !texture) return
+    const { model } = this.state
+    if (!model) return
     const {
       heightScale = 4000,
       interval = 0.06,
@@ -160,7 +164,6 @@ export default class ContourTerrainLayer extends Layer<ContourTerrainLayerProps>
     } = this.props
     model.shaderInputs.setProps({
       terrain: {
-        uHeightmap: texture,
         heightScale,
         interval,
         lineWidth,
@@ -175,7 +178,6 @@ export default class ContourTerrainLayer extends Layer<ContourTerrainLayerProps>
   finalizeState(context: LayerContext) {
     super.finalizeState(context)
     this.state.model?.destroy()
-    this.state.texture?.destroy()
   }
 
   _getModel(): Model {
@@ -185,24 +187,6 @@ export default class ContourTerrainLayer extends Layer<ContourTerrainLayerProps>
       bufferLayout: this.getAttributeManager()!.getBufferLayouts(),
       topology: 'triangle-list',
       isInstanced: false,
-    })
-  }
-
-  _updateTexture() {
-    const { heightmap } = this.props
-    this.state.texture?.destroy()
-    this.state.texture = this.context.device.createTexture({
-      format: 'r32float',
-      dimension: '2d',
-      width: heightmap.width,
-      height: heightmap.height,
-      data: heightmap.data,
-      sampler: {
-        minFilter: 'nearest',
-        magFilter: 'nearest',
-        addressModeU: 'clamp-to-edge',
-        addressModeV: 'clamp-to-edge',
-      },
     })
   }
 }
