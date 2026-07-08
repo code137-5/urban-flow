@@ -10,7 +10,7 @@ export function TopNav() {
     <header className={styles.nav}>
       <div className={styles.inner}>
         <a className={styles.wordmark} href="#top" aria-label="Urban Flow — back to top">
-          Urban <span className={styles.accent}>Flow</span>
+          Urban Flow
         </a>
         <nav className={styles.links} aria-label="Primary">
           <a className={styles.link} href="#about">
