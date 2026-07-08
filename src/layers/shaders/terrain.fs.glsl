@@ -28,7 +28,7 @@ void main(void) {
   float line = 1.0 - smoothstep(terrain.lineWidth, terrain.lineWidth + 0.03, f);
   if (line < 0.02) discard; // keep only the lines; surface between is transparent
 
-  vec3 color = mix(terrain.lineColor, terrain.peakColor, vHeight);
+  vec3 color = mix(terrain.lineColor, terrain.peakColor, vHeight).rgb;
   fragColor = vec4(color, line * layer.opacity);
 
   DECKGL_FILTER_COLOR(fragColor, geometry);

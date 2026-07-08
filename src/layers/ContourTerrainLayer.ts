@@ -164,8 +164,9 @@ export default class ContourTerrainLayer extends Layer<ContourTerrainLayerProps>
         heightScale,
         interval,
         lineWidth,
-        lineColor: lineColor.map((x) => x / 255) as [number, number, number],
-        peakColor: peakColor.map((x) => x / 255) as [number, number, number],
+        // Pad RGB (0–255) → vec4 in 0–1; alpha unused (RGB is read in the shader).
+        lineColor: [...lineColor.map((x) => x / 255), 1] as [number, number, number, number],
+        peakColor: [...peakColor.map((x) => x / 255), 1] as [number, number, number, number],
       },
     })
     model.draw(this.context.renderPass)
