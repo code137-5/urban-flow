@@ -27,11 +27,11 @@ export type DatasetId = 'ttareungi' | 'saenghwal-idong' | 'subway'
 
 export interface DatasetMeta {
   id: DatasetId
-  /** Display name (Korean). */
+  /** Display name. */
   label: string
   /** One-line description shown in the dashboard panel header. */
   description: string
-  /** Unit of the weight, e.g. '대여 건수', '이동 인구', '승하차 인원'. */
+  /** Unit of the weight, e.g. 'rentals', 'people moved', 'riders'. */
   unit: string
   /** Accent hue (particles/contours) so panels are visually distinguishable. */
   accent: string
