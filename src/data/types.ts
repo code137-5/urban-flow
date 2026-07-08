@@ -43,3 +43,12 @@ export interface DataSource {
   /** Load & normalize the dataset into weighted geopoints. */
   load(): Promise<GeoPoint[]>
 }
+
+/** A scalar field sampled on a regular grid over `bounds` (row-major `data`). */
+export interface Heightmap {
+  /** Normalized [0,1] values; −1 marks masked-out (outside Seoul) cells. */
+  data: Float32Array
+  width: number
+  height: number
+  bounds: Bounds
+}
