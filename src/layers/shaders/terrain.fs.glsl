@@ -17,12 +17,15 @@ void main(void) {
   // below the first interval so only genuine rings around hotspots remain.
   if (vHeight < terrain.interval * 0.5) discard;
 
-  // Contour lines via fract + fwidth: distance (in fractions of an interval)
-  // to the nearest contour, divided by its screen-space derivative for AA.
+  // Contour lines WITHOUT screen-space derivatives. `fwidth`/`dFdx` are a
+  // common mobile GLSL ES compile-failure class (strict drivers reject them
+  // even under #version 300 es), and this is the only layer that used them —
+  // hence the terrain-only shader error on mobile. Instead, measure the
+  // distance to the nearest contour directly in height-interval units and
+  // soften with smoothstep. `lineWidth` is the line half-width in those units.
   float h = vHeight / terrain.interval;
-  float dh = max(fwidth(h), 1e-4); // clamp: fwidth blows up past ~80 deg pitch
-  float d = abs(fract(h - 0.5) - 0.5) / dh;
-  float line = 1.0 - clamp(d / terrain.lineWidth, 0.0, 1.0);
+  float f = abs(fract(h - 0.5) - 0.5); // 0 on a contour, 0.5 midway between
+  float line = 1.0 - smoothstep(terrain.lineWidth, terrain.lineWidth + 0.03, f);
   if (line < 0.02) discard; // keep only the lines; surface between is transparent
 
   vec3 color = mix(terrain.lineColor, terrain.peakColor, vHeight);

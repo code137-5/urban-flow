@@ -18,7 +18,7 @@ export type ContourTerrainLayerProps = {
   heightScale?: number
   /** Contour spacing in normalized height units. */
   interval?: number
-  /** Line half-width in pixels. */
+  /** Line half-width, in fractions of a contour interval (0–0.5). */
   lineWidth?: number
   /** Line color at height 0 (RGB 0–255). */
   lineColor?: [number, number, number]
@@ -29,7 +29,7 @@ export type ContourTerrainLayerProps = {
 const defaultProps: DefaultProps<ContourTerrainLayerProps> = {
   heightScale: { type: 'number', value: 4000 },
   interval: { type: 'number', value: 0.06 },
-  lineWidth: { type: 'number', value: 1.5 },
+  lineWidth: { type: 'number', value: 0.04 },
   lineColor: { type: 'color', value: [251, 191, 36] },
   peakColor: { type: 'color', value: [125, 211, 252] },
 }
@@ -86,7 +86,8 @@ function buildGridMesh(heightmap: Heightmap): GridMesh {
 /**
  * Renders a heightmap as a 3D contour surface: the grid mesh is displaced in the
  * vertex shader by height, and the fragment shader draws only contour lines
- * (fract+fwidth). Masked cells (−1) are discarded. Technique ported from
+ * (fract, in height-interval units — no screen-space derivatives, for mobile
+ * GLSL ES compatibility). Masked cells (−1) are discarded. Technique ported from
  * Aete/seoul-terrain-animation.
  */
 export default class ContourTerrainLayer extends Layer<ContourTerrainLayerProps> {
@@ -153,7 +154,7 @@ export default class ContourTerrainLayer extends Layer<ContourTerrainLayerProps>
     const {
       heightScale = 4000,
       interval = 0.06,
-      lineWidth = 1.5,
+      lineWidth = 0.04,
       lineColor = [251, 191, 36],
       peakColor = [125, 211, 252],
     } = this.props
