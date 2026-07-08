@@ -1,7 +1,11 @@
 #version 300 es
 #define SHADER_NAME contour-terrain-fragment
 
-precision highp float;
+// NOTE: no `precision` statement here on purpose — luma.gl's assembled prologue
+// already declares `precision highp float;` for the fragment stage. Declaring it
+// again duplicates it, which some strict mobile GLSL ES drivers reject (desktop
+// and ANGLE tolerate it). The base map layers don't redeclare precision, and
+// they compile on the affected device — so this duplicate is a prime suspect.
 
 in float vHeight;
 in float vMask;
