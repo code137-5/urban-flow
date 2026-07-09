@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import DeckGL from '@deck.gl/react'
 import type { Layer } from '@deck.gl/core'
-import { INITIAL_VIEW_STATE, SEOUL_BOUNDS } from '../config'
+import { INITIAL_VIEW_STATE, SEOUL_BOUNDS, fitSeoulViewState } from '../config'
 import { computeHeightmap } from '../data/field'
 import ContourTerrainLayer from '../layers/ContourTerrainLayer'
 import { seoulBoundaryLayer } from '../layers/seoulBoundaryLayer'
@@ -16,8 +16,11 @@ import styles from './Dashboard.module.css'
 // ~1s once per session, then cached.
 const GRID_SIZE = 200
 
-// The shared INITIAL_VIEW_STATE frames Seoul for a full-screen canvas; inside a
-// bounded panel it reads low, so tighten zoom and drop the center a touch to fill.
+// Fallback view used before the container has been measured (0×0 during the
+// first render, before layout). The shared INITIAL_VIEW_STATE frames Seoul for a
+// full-screen canvas; inside a bounded panel it reads low, so tighten zoom and
+// drop the center a touch. Once measured, `fitSeoulViewState` replaces this with
+// a size-fitted camera.
 const PANEL_VIEW_STATE = {
   ...INITIAL_VIEW_STATE,
   latitude: 37.535,
@@ -95,6 +98,32 @@ export function TerrainPanel({ source }: { source: DataSource }) {
   const [webglFailed, setWebglFailed] = useState(false)
   // Captured shader compile error (for on-screen diagnostics on mobile).
   const [shaderError, setShaderError] = useState<ShaderError | null>(null)
+  // The DeckGL container's measured pixel size. Drives the fitted camera so the
+  // whole Seoul area stays framed at any panel width/height. `null` until the
+  // first ResizeObserver callback (guards against 0×0 before layout).
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null)
+
+  // Measure our OWN container (not the window) so a panel in a responsive grid
+  // reframes when its cell grows/shrinks. Recomputes on mount + every resize.
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const ro = new ResizeObserver((entries) => {
+      const r = entries[0]?.contentRect
+      if (!r || r.width === 0 || r.height === 0) return
+      setSize({ width: r.width, height: r.height })
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  // Fitted "contour poster" camera for the current panel size. Falls back to the
+  // sensible default until the container has been measured.
+  const viewState = useMemo(
+    () => (size ? fitSeoulViewState(size.width, size.height) : PANEL_VIEW_STATE),
+    [size],
+  )
 
   // Probe support once; if it fails, skip deck.gl (avoids the shader-error
   // overlay) and surface the driver's compile log on-screen.
@@ -218,10 +247,10 @@ export function TerrainPanel({ source }: { source: DataSource }) {
   }
 
   return (
-    <>
+    <div ref={containerRef} style={{ position: 'absolute', inset: '0' }}>
       <DeckGL
         style={{ position: 'absolute', inset: '0' }}
-        viewState={PANEL_VIEW_STATE}
+        viewState={viewState}
         controller={false}
         layers={layers}
         onError={(error) => {
@@ -236,6 +265,6 @@ export function TerrainPanel({ source }: { source: DataSource }) {
           Building terrain…
         </div>
       )}
-    </>
+    </div>
   )
 }
