@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Container, Section, Eyebrow } from '../ui/layout'
-import { DEFAULT_SOURCE, getSource } from '../data/sources'
+import { DEFAULT_SOURCE, SOURCES, getSource } from '../data/sources'
 import type { DatasetId } from '../data/types'
 import { TerrainPanel } from './TerrainPanel'
 import styles from './Dashboard.module.css'
@@ -80,6 +80,14 @@ export function Dashboard() {
     setPanels((prev) => (prev.length <= 1 ? prev : prev.filter((p) => p.key !== key)))
   }
 
+  // Switch a single panel's dataset. State is keyed per panel, so mapping over
+  // `prev` and replacing only the matching key leaves every other panel — and its
+  // deck.gl instance — untouched; that panel's TerrainPanel then recomputes its
+  // heightmap from the new `source` prop.
+  const changeSource = (key: number, sourceId: DatasetId) => {
+    setPanels((prev) => prev.map((p) => (p.key === key ? { ...p, sourceId } : p)))
+  }
+
   // Grid children = panels + (the trailing add tile, when below the cap). Column
   // count is min(width cap, children) so panels stay readable and never overflow.
   const itemCount = panels.length + (canAdd ? 1 : 0)
@@ -99,7 +107,7 @@ export function Dashboard() {
         </p>
 
         <div className={styles.panels} style={gridStyle}>
-          {panels.map((panel) => {
+          {panels.map((panel, index) => {
             const source = getSource(panel.sourceId) ?? DEFAULT_SOURCE
             const { meta } = source
             return (
@@ -107,11 +115,23 @@ export function Dashboard() {
                 <header className={styles.panelHead}>
                   <span className={styles.dot} aria-hidden="true" />
                   <div className={styles.panelTitleGroup}>
-                    {/* Task 4: dataset dropdown goes here — this slot will hold a
-                        <select> of SOURCES; for now it shows the source label as
-                        static text driven by the descriptor's sourceId. */}
+                    {/* Per-panel dataset selector — a native <select> of all
+                        SOURCES. Changing it updates only THIS panel's sourceId
+                        (state is keyed per panel), which re-renders its terrain
+                        and header copy. It doubles as the panel title. */}
                     <div className={styles.selectorSlot}>
-                      <h3 className={styles.panelTitle}>{meta.label}</h3>
+                      <select
+                        className={styles.select}
+                        value={panel.sourceId}
+                        aria-label={`Dataset for panel ${index + 1}`}
+                        onChange={(e) => changeSource(panel.key, e.target.value as DatasetId)}
+                      >
+                        {SOURCES.map((s) => (
+                          <option key={s.meta.id} value={s.meta.id}>
+                            {s.meta.label}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                     <p className={styles.panelSub}>{meta.description}</p>
                   </div>

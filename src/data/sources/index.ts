@@ -1,11 +1,14 @@
 import type { DataSource, DatasetId } from '../types'
 import { ttareungiSource } from './ttareungi'
+import { saenghwalIdongSource } from './saenghwalIdong'
+import { subwaySource } from './subway'
 
 /**
  * Registry of available datasets. Add a new dataset by writing a `DataSource`
  * adapter and appending it here — the pipeline and UI pick it up automatically.
+ * Order (ttareungi first) sets the dashboard's default panel dataset.
  */
-export const SOURCES: DataSource[] = [ttareungiSource]
+export const SOURCES: DataSource[] = [ttareungiSource, saenghwalIdongSource, subwaySource]
 
 export const DEFAULT_SOURCE = SOURCES[0]
 
