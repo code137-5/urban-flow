@@ -13,10 +13,13 @@
   margin-bottom: var(--space-xxl);
 }
 
-/* One panel now (2.2fr) + a growth-hint tile (1fr). */
+/* Responsive panel grid. `grid-template-columns` is set inline by Dashboard.tsx
+   as repeat(N, minmax(0, 1fr)) — N is min(width cap, item count), so panels wrap
+   to new rows past 3 and never overflow or leave empty tracks. minmax(0, 1fr)
+   lets each cell shrink below its content width instead of pushing the row wide. */
 .panels {
   display: grid;
-  grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-md);
   align-items: stretch;
 }
@@ -46,6 +49,13 @@
 
 .panelTitleGroup {
   min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* Placeholder slot for the Task 4 dataset dropdown. For now it just wraps the
+   static source label; keep it a distinct element so the <select> can drop in. */
+.selectorSlot {
+  min-width: 0;
 }
 
 .panelTitle {
@@ -71,10 +81,47 @@
   padding: 2px var(--space-xs);
 }
 
-/* The visualization canvas sits directly on --bg, per the design system. */
+/* Flat ghost "×" remove control (Carbon icon-button). No corners, no shadow;
+   a subtle layer-02 wash on hover. Disabled (last remaining panel) reads muted. */
+.remove {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  font-size: 20px;
+  line-height: 1;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-helper);
+  cursor: pointer;
+  transition: background 0.11s, color 0.11s;
+}
+
+.remove:hover:not(:disabled) {
+  background: var(--layer-02);
+  color: var(--text-primary);
+}
+
+.remove:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.remove:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+/* The visualization canvas sits directly on --bg, per the design system. A
+   max-height keeps a single full-width panel from becoming absurdly tall while
+   the 4/3 aspect ratio governs multi-column cells. */
 .canvas {
   position: relative;
   aspect-ratio: 4 / 3;
+  max-height: 520px;
   background: var(--bg);
   overflow: hidden;
 }
@@ -154,7 +201,7 @@
   color: var(--text-helper);
 }
 
-/* Growth-hint tile — dashed, non-interactive until P5 wires it up. */
+/* Add-dataset tile — dashed, interactive, the trailing cell of the grid. */
 .addPanel {
   display: flex;
   flex-direction: column;
@@ -166,8 +213,32 @@
   background: transparent;
   border: 1px dashed var(--border-subtle-02);
   color: var(--text-helper);
-  cursor: not-allowed;
+  cursor: pointer;
   text-align: center;
+  transition: background 0.11s, border-color 0.11s;
+}
+
+.addPanel:hover:not(.addPanelMax) {
+  background: var(--layer-01);
+  border-color: var(--border-strong);
+}
+
+.addPanel:hover:not(.addPanelMax) .plus,
+.addPanel:hover:not(.addPanelMax) .addLabel {
+  color: var(--link);
+}
+
+.addPanel:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* Cap reached (6 panels) — non-interactive, clearly disabled. */
+.addPanelMax {
+  cursor: not-allowed;
+  border-style: solid;
+  border-color: var(--border-subtle);
+  color: var(--text-disabled);
 }
 
 .plus {
@@ -188,11 +259,10 @@
   color: var(--text-placeholder);
 }
 
+/* Column count is driven inline by Dashboard.tsx (min of the width cap and item
+   count), which already collapses to 1 on mobile — no column override needed
+   here; just tighten the add tile on small screens. */
 @media (max-width: 672px) {
-  .panels {
-    grid-template-columns: 1fr;
-  }
-
   .addPanel {
     min-height: 120px;
   }
