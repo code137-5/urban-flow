@@ -41,5 +41,5 @@ Thumbs.db
 data/*.bin
 
 # Local, uncommitted tooling (visual-verification + orchestration helpers)
-.shot.mjs
+.shot*.mjs
 .design-review.wf.js
