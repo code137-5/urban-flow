@@ -21,12 +21,12 @@
   font: var(--type-body-sm);
   font-weight: 600;
   letter-spacing: 0.16px;
-  color: #ffffff;
+  color: var(--text-brand-max);
   text-decoration: none;
   white-space: nowrap;
 }
 .wordmark:hover {
-  color: #ffffff;
+  color: var(--text-brand-max);
 }
 
 .links {
@@ -40,7 +40,7 @@
   letter-spacing: 0.16px;
   color: var(--text-secondary);
   text-decoration: none;
-  transition: color 70ms ease;
+  transition: color var(--duration-fast-01) var(--ease-standard);
 }
 .link:hover {
   color: var(--link);

@@ -39,6 +39,11 @@ Thumbs.db
 
 # Precomputed / large generated assets (regenerate via scripts/)
 data/*.bin
+
+# Local, uncommitted tooling (visual-verification + orchestration helpers)
+.shot*.mjs
+.design-review.wf.js
+
 # Raw dataset inputs — synthetic ones regenerate via `npm run make-samples`,
 # real ones are large. The rendered public/data/*.json IS committed (Vercel
 # deploys without a preprocessing step).

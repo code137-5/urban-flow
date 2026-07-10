@@ -57,7 +57,7 @@
 .link {
   color: var(--link);
   text-decoration: none;
-  transition: color 70ms ease;
+  transition: color var(--duration-fast-01) var(--ease-standard);
 }
 .link:hover {
   color: var(--link-hover);
