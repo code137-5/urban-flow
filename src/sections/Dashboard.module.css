@@ -75,7 +75,10 @@
 .select {
   width: 100%;
   height: var(--control-height);
-  padding: 0 calc(var(--space-md) + 16px + var(--space-xs)) 0 var(--space-md);
+  /* No left inset: the selected label shares its left edge with the subtitle
+     below and sits a clean 12px (--space-sm gap) from the dot, so the header
+     reads as one column — dot · title / subtitle. Right inset clears the chevron. */
+  padding: 0 calc(var(--space-md) + 16px + var(--space-xs)) 0 0;
   font: var(--type-body-lg);
   letter-spacing: 0.16px;
   color: var(--text-primary);
