@@ -1,6 +1,9 @@
 import { WebMercatorViewport } from '@deck.gl/core'
 import type { MapViewState } from '@deck.gl/core'
-import type { Bounds } from './data/types'
+// SEOUL_BOUNDS lives in its own deck.gl-free module so the preprocessing
+// scripts can import it; re-exported here to keep existing import paths.
+export { SEOUL_BOUNDS } from './data/bounds'
+import { SEOUL_BOUNDS } from './data/bounds'
 
 /**
  * CARTO dark-matter basemap style. Currently unused — we render on a plain dark
@@ -9,9 +12,6 @@ import type { Bounds } from './data/types'
  */
 export const BASEMAP_STYLE =
   'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
-
-/** Seoul area of interest: [minLng, minLat, maxLng, maxLat]. */
-export const SEOUL_BOUNDS: Bounds = [126.76, 37.42, 127.18, 37.7]
 
 /** Initial camera over Seoul: high pitch for the "contour poster" look. */
 export const INITIAL_VIEW_STATE: MapViewState = {

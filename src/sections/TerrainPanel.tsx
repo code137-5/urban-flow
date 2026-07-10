@@ -92,6 +92,8 @@ function tuningEnabled(): boolean {
 export function TerrainPanel({ source }: { source: DataSource }) {
   const [points, setPoints] = useState<GeoPoint[] | null>(null)
   const [heightmap, setHeightmap] = useState<Heightmap | null>(null)
+  // Set when source.load() rejects (e.g. a preprocessed static file is missing).
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [controls, setControls] = useState<Controls>(DEFAULT_CONTROLS)
   // If deck.gl can't initialize/compile on this device (some mobile GPUs), fall
   // back to a zero-WebGL SVG contour so the panel is never blank.
@@ -140,9 +142,16 @@ export function TerrainPanel({ source }: { source: DataSource }) {
 
   useEffect(() => {
     let alive = true
-    source.load().then((p) => {
-      if (alive) setPoints(p)
-    })
+    setLoadError(null)
+    source.load().then(
+      (p) => {
+        if (alive) setPoints(p)
+      },
+      (err: unknown) => {
+        console.warn(`[urban-flow] failed to load ${source.meta.id}:`, err)
+        if (alive) setLoadError(err instanceof Error ? err.message : String(err))
+      },
+    )
     return () => {
       alive = false
     }
@@ -262,7 +271,7 @@ export function TerrainPanel({ source }: { source: DataSource }) {
       />
       {!heightmap && (
         <div className={styles.loading} role="status">
-          Building terrain…
+          {loadError ? `Failed to load data — ${loadError}` : 'Building terrain…'}
         </div>
       )}
     </div>

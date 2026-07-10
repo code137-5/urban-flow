@@ -39,3 +39,7 @@ Thumbs.db
 
 # Precomputed / large generated assets (regenerate via scripts/)
 data/*.bin
+# Raw dataset inputs — synthetic ones regenerate via `npm run make-samples`,
+# real ones are large. The rendered public/data/*.json IS committed (Vercel
+# deploys without a preprocessing step).
+data/raw/
