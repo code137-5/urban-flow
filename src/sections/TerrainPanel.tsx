@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import DeckGL from '@deck.gl/react'
-import type { Layer } from '@deck.gl/core'
+import { LinearInterpolator } from '@deck.gl/core'
+import type { Layer, MapViewState, ViewStateChangeParameters } from '@deck.gl/core'
 import { INITIAL_VIEW_STATE, SEOUL_BOUNDS, fitSeoulViewState } from '../config'
 import { computeHeightmap } from '../data/field'
 import ContourTerrainLayer from '../layers/ContourTerrainLayer'
@@ -25,6 +26,37 @@ const PANEL_VIEW_STATE = {
   ...INITIAL_VIEW_STATE,
   latitude: 37.535,
   zoom: 10.9,
+}
+
+// Interaction bounds. The camera is a constrained turntable: users may zoom and
+// rotate (bearing) only — panning and free-tilt are disabled so Seoul stays
+// framed and centered. Tilt is switched between two fixed presets by the 2D/3D
+// toggle rather than dragged.
+const MIN_ZOOM = 9
+const MAX_ZOOM = 14
+const ZOOM_STEP = 0.6
+const PITCH_3D = 60 // the tilted "contour poster" look
+const PITCH_2D = 0 // top-down plan view
+
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
+
+// Eased transitions: +/- buttons animate zoom; the 2D/3D toggle animates tilt.
+const zoomInterpolator = new LinearInterpolator(['zoom'])
+const pitchInterpolator = new LinearInterpolator(['pitch'])
+
+/**
+ * The user-controllable camera params for a panel: zoom, bearing (rotation), and
+ * pitch (2D↔3D). Center is intentionally excluded — each panel keeps its own
+ * size-fitted center so panning is impossible and Seoul stays framed. Shared
+ * verbatim across panels when the dashboard's "sync views" option is on.
+ * Optional transition props ride along so a button/toggle change animates.
+ */
+export type PanelCamera = {
+  zoom: number
+  bearing: number
+  pitch: number
+  transitionDuration?: number
+  transitionInterpolator?: LinearInterpolator
 }
 
 /**
@@ -86,10 +118,23 @@ function tuningEnabled(): boolean {
 /**
  * A single dashboard panel: real deck.gl contour terrain for one `DataSource`.
  * The KDE heightmap + Seoul mask are computed once (deferred a frame so the
- * loading state paints first), then rendered as a static "contour poster" at the
- * pitched Seoul view. Colors come from `Controls` and are live-tunable via lil-gui.
+ * loading state paints first), then rendered at the pitched Seoul view. Colors
+ * come from `Controls` and are live-tunable via lil-gui.
+ *
+ * The camera is controlled: `camera` (zoom/bearing/pitch, center excluded) is
+ * merged onto the size-fitted view, and every change is reported via
+ * `onCameraChange`. The dashboard owns this state so it can mirror one panel's
+ * camera across all panels ("sync views"). A null `camera` means "use the fit".
  */
-export function TerrainPanel({ source }: { source: DataSource }) {
+export function TerrainPanel({
+  source,
+  camera,
+  onCameraChange,
+}: {
+  source: DataSource
+  camera: PanelCamera | null
+  onCameraChange: (camera: PanelCamera) => void
+}) {
   const [points, setPoints] = useState<GeoPoint[] | null>(null)
   const [heightmap, setHeightmap] = useState<Heightmap | null>(null)
   // Set when source.load() rejects (e.g. a preprocessed static file is missing).
@@ -121,11 +166,70 @@ export function TerrainPanel({ source }: { source: DataSource }) {
   }, [])
 
   // Fitted "contour poster" camera for the current panel size. Falls back to the
-  // sensible default until the container has been measured.
-  const viewState = useMemo(
+  // sensible default until the container has been measured. This is the *base*
+  // view: it reframes on resize and supplies defaults before the user interacts.
+  const fittedView = useMemo<MapViewState>(
     () => (size ? fitSeoulViewState(size.width, size.height) : PANEL_VIEW_STATE),
     [size],
   )
+
+  // Effective controllable params: the (possibly shared) camera if set, else the
+  // fit. Center always comes from `fittedView` and is never overridden, so the
+  // panel can't be panned off Seoul.
+  const effectiveZoom = camera?.zoom ?? fittedView.zoom
+  const effectiveBearing = camera?.bearing ?? fittedView.bearing ?? 0
+  const effectivePitch = camera?.pitch ?? fittedView.pitch ?? PITCH_3D
+  const is3d = effectivePitch > 0
+
+  const viewState: MapViewState = {
+    ...fittedView,
+    zoom: effectiveZoom,
+    bearing: effectiveBearing,
+    pitch: effectivePitch,
+    ...(camera?.transitionDuration
+      ? {
+          transitionDuration: camera.transitionDuration,
+          transitionInterpolator: camera.transitionInterpolator,
+        }
+      : {}),
+  }
+
+  // deck.gl reports every camera change here (drag-rotate, wheel-zoom). Emit only
+  // zoom + bearing; pitch is pinned to the current 2D/3D preset so a vertical
+  // drag can't tilt, and center is dropped so the view can't pan. Skip frames
+  // emitted by an in-flight transition so button/toggle animations play out.
+  const handleViewStateChange = (params: ViewStateChangeParameters) => {
+    if (params.interactionState?.inTransition) return
+    const v = params.viewState as MapViewState
+    onCameraChange({
+      zoom: clamp(v.zoom, MIN_ZOOM, MAX_ZOOM),
+      bearing: v.bearing ?? 0,
+      pitch: effectivePitch,
+    })
+  }
+
+  // +/- buttons: nudge zoom with a short transition, preserving rotation + tilt.
+  const nudgeZoom = (delta: number) => {
+    onCameraChange({
+      zoom: clamp(effectiveZoom + delta, MIN_ZOOM, MAX_ZOOM),
+      bearing: effectiveBearing,
+      pitch: effectivePitch,
+      transitionDuration: 200,
+      transitionInterpolator: zoomInterpolator,
+    })
+  }
+
+  // 2D/3D toggle: swap between the top-down and tilted presets with an eased
+  // pitch transition, keeping the current zoom + rotation.
+  const setThreeD = (threeD: boolean) => {
+    onCameraChange({
+      zoom: effectiveZoom,
+      bearing: effectiveBearing,
+      pitch: threeD ? PITCH_3D : PITCH_2D,
+      transitionDuration: 450,
+      transitionInterpolator: pitchInterpolator,
+    })
+  }
 
   // Probe support once; if it fails, skip deck.gl (avoids the shader-error
   // overlay) and surface the driver's compile log on-screen.
@@ -260,7 +364,21 @@ export function TerrainPanel({ source }: { source: DataSource }) {
       <DeckGL
         style={{ position: 'absolute', inset: '0' }}
         viewState={viewState}
-        controller={false}
+        onViewStateChange={handleViewStateChange}
+        // Turntable interaction: left-drag rotates (dragMode 'rotate'), scroll /
+        // pinch zooms. Pan is disabled so the terrain stays centered; pitch is
+        // pinned per 2D/3D preset in handleViewStateChange, so drag only rotates.
+        controller={{
+          dragMode: 'rotate',
+          dragPan: false,
+          dragRotate: true,
+          touchRotate: true,
+          scrollZoom: true,
+          touchZoom: true,
+          doubleClickZoom: false,
+          keyboard: false,
+          inertia: 250,
+        }}
         layers={layers}
         onError={(error) => {
           // Shader compile/link or context failure on this device — degrade
@@ -269,6 +387,48 @@ export function TerrainPanel({ source }: { source: DataSource }) {
           setWebglFailed(true)
         }}
       />
+      {heightmap && (
+        <>
+          <div className={styles.viewToggle} role="group" aria-label="View angle">
+            <button
+              type="button"
+              className={`${styles.viewBtn} ${!is3d ? styles.viewBtnActive : ''}`}
+              aria-pressed={!is3d}
+              onClick={() => setThreeD(false)}
+            >
+              2D
+            </button>
+            <button
+              type="button"
+              className={`${styles.viewBtn} ${is3d ? styles.viewBtnActive : ''}`}
+              aria-pressed={is3d}
+              onClick={() => setThreeD(true)}
+            >
+              3D
+            </button>
+          </div>
+          <div className={styles.zoomControls}>
+            <button
+              type="button"
+              className={styles.zoomBtn}
+              aria-label="Zoom in"
+              onClick={() => nudgeZoom(ZOOM_STEP)}
+              disabled={effectiveZoom >= MAX_ZOOM}
+            >
+              +
+            </button>
+            <button
+              type="button"
+              className={styles.zoomBtn}
+              aria-label="Zoom out"
+              onClick={() => nudgeZoom(-ZOOM_STEP)}
+              disabled={effectiveZoom <= MIN_ZOOM}
+            >
+              −
+            </button>
+          </div>
+        </>
+      )}
       {!heightmap && (
         <div className={styles.loading} role="status">
           {loadError ? `Failed to load data — ${loadError}` : 'Building terrain…'}

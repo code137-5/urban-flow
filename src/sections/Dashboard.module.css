@@ -15,6 +15,67 @@
   margin-bottom: var(--space-xxl);
 }
 
+/* Toolbar above the panel grid — holds the cross-panel "sync views" toggle,
+   right-aligned. */
+.toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--space-md);
+}
+
+/* Carbon-style checkbox row on dark: flat 0px box, 1px hairline, a light fill +
+   dark check when on. Disabled (single panel) reads muted. */
+.syncToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font: var(--type-body-sm);
+  letter-spacing: 0.16px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.syncCheckbox {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--field-01);
+  border: 1px solid var(--border-strong);
+  cursor: pointer;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  transition: background var(--duration-fast-02) var(--ease-standard), border-color var(--duration-fast-02) var(--ease-standard);
+}
+
+.syncCheckbox:checked {
+  background: var(--link);
+  border-color: var(--link);
+  /* White check mark (inline SVG data-URI). */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23161616' stroke-width='1.75' d='M4 8.5l2.5 2.5L12 5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.syncCheckbox:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.syncToggle:has(.syncCheckbox:disabled) {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+.syncCheckbox:disabled {
+  border-color: var(--border-subtle);
+  cursor: not-allowed;
+}
+
 /* Responsive panel grid. `grid-template-columns` is set inline by Dashboard.tsx
    as repeat(N, minmax(0, 1fr)) — N is min(width cap, item count), so panels wrap
    to new rows past 3 and never overflow or leave empty tracks. minmax(0, 1fr)
@@ -184,6 +245,8 @@
   max-height: 520px;
   background: var(--bg);
   overflow: hidden;
+  /* Drag-to-rotate shouldn't select panel text if the pointer leaves the canvas. */
+  user-select: none;
 }
 
 /* Faint blue elevation wash under the contours. */
@@ -196,6 +259,108 @@
     var(--accent-glow),
     var(--accent-glow-0) 62%
   );
+}
+
+/* Stacked +/- zoom controls, bottom-right of the canvas. Carbon icon-button
+   look: flat 0px corners, no shadow, a --layer-02 body inside one --border-subtle
+   hairline with the two buttons split by a divider. */
+.zoomControls {
+  position: absolute;
+  right: var(--space-sm);
+  bottom: var(--space-sm);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  background: var(--layer-02);
+  border: 1px solid var(--border-subtle);
+}
+
+.zoomBtn {
+  width: var(--control-height-sm);
+  height: var(--control-height-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  line-height: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--duration-fast-02) var(--ease-standard), color var(--duration-fast-02) var(--ease-standard);
+}
+
+.zoomBtn + .zoomBtn {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.zoomBtn:hover:not(:disabled) {
+  background: var(--layer-hover-01);
+  color: var(--text-primary);
+}
+
+.zoomBtn:active:not(:disabled) {
+  background: var(--layer-03);
+}
+
+.zoomBtn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.zoomBtn:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+/* 2D / 3D view-angle toggle, bottom-left of the canvas (mirrors the zoom
+   controls). Carbon content-switcher look: two flat cells sharing one hairline
+   border; the active cell inverts to a light fill. */
+.viewToggle {
+  position: absolute;
+  left: var(--space-sm);
+  bottom: var(--space-sm);
+  z-index: 2;
+  display: flex;
+  border: 1px solid var(--border-subtle);
+  background: var(--layer-02);
+}
+
+.viewBtn {
+  min-width: calc(var(--control-height-sm) + var(--space-xs));
+  height: var(--control-height-sm);
+  padding: 0 var(--space-xs);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: var(--type-caption);
+  letter-spacing: 0.32px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--duration-fast-02) var(--ease-standard), color var(--duration-fast-02) var(--ease-standard);
+}
+
+.viewBtn + .viewBtn {
+  border-left: 1px solid var(--border-subtle);
+}
+
+.viewBtn:hover:not(.viewBtnActive) {
+  background: var(--layer-hover-01);
+  color: var(--text-primary);
+}
+
+.viewBtn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* Active angle — inverted, the one high-contrast cell. */
+.viewBtnActive {
+  background: var(--text-primary);
+  color: var(--bg);
+  cursor: default;
 }
 
 /* Zero-WebGL SVG contour shown if deck.gl fails to initialize on a device. */

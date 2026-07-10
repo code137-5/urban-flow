@@ -4,6 +4,7 @@ import { Container, Section, Eyebrow } from '../ui/layout'
 import { DEFAULT_SOURCE, SOURCES, getSource } from '../data/sources'
 import type { DatasetId } from '../data/types'
 import { TerrainPanel } from './TerrainPanel'
+import type { PanelCamera } from './TerrainPanel'
 import styles from './Dashboard.module.css'
 
 /**
@@ -66,6 +67,38 @@ export function Dashboard() {
   const width = useViewportWidth()
   const canAdd = panels.length < MAX_PANELS
 
+  // Camera (zoom/bearing/pitch) per panel, keyed by panel.key; null = "use the
+  // fit". When `linked` is on, every panel reads and writes the FIRST panel's
+  // entry instead of its own, so all views move together — the "sync views"
+  // option. Center is never stored (see PanelCamera), so different-sized cells
+  // still frame Seoul correctly while sharing rotation/zoom/tilt.
+  const [cameras, setCameras] = useState<Record<number, PanelCamera | null>>({})
+  const [linked, setLinked] = useState(false)
+  const firstKey = panels[0]?.key ?? 0
+
+  const cameraFor = (key: number): PanelCamera | null => cameras[linked ? firstKey : key] ?? null
+
+  const handleCameraChange = (key: number) => (next: PanelCamera) => {
+    const target = linked ? firstKey : key
+    setCameras((prev) => ({ ...prev, [target]: next }))
+  }
+
+  const toggleLinked = () => {
+    setLinked((prevLinked) => {
+      // On unlink, seed every panel with the shared camera so nothing jumps;
+      // they then diverge as each is dragged independently.
+      if (prevLinked) {
+        setCameras((prev) => {
+          const shared = prev[firstKey] ?? null
+          const next = { ...prev }
+          for (const p of panels) next[p.key] = shared
+          return next
+        })
+      }
+      return !prevLinked
+    })
+  }
+
   const addPanel = () => {
     setPanels((prev) => {
       if (prev.length >= MAX_PANELS) return prev
@@ -105,6 +138,19 @@ export function Dashboard() {
           Add datasets to build a live comparison. The grid starts with one panel and grows to
           three across, then wraps to a second row — up to six panels. Remove any panel to refocus.
         </p>
+
+        <div className={styles.toolbar}>
+          <label className={styles.syncToggle}>
+            <input
+              type="checkbox"
+              className={styles.syncCheckbox}
+              checked={linked}
+              onChange={toggleLinked}
+              disabled={panels.length < 2}
+            />
+            <span>Sync all views to panel 1</span>
+          </label>
+        </div>
 
         <div className={styles.panels} style={gridStyle}>
           {panels.map((panel, index) => {
@@ -148,7 +194,11 @@ export function Dashboard() {
                 </header>
 
                 <div className={styles.canvas}>
-                  <TerrainPanel source={source} />
+                  <TerrainPanel
+                    source={source}
+                    camera={cameraFor(panel.key)}
+                    onCameraChange={handleCameraChange(panel.key)}
+                  />
                 </div>
 
                 <footer className={styles.panelMeta}>
