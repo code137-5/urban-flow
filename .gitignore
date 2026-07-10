@@ -39,3 +39,7 @@ Thumbs.db
 
 # Precomputed / large generated assets (regenerate via scripts/)
 data/*.bin
+
+# Local, uncommitted tooling (visual-verification + orchestration helpers)
+.shot.mjs
+.design-review.wf.js

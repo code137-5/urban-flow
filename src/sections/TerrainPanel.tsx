@@ -235,7 +235,7 @@ export function TerrainPanel({ source }: { source: DataSource }) {
       <>
         <ContourFallback />
         {shaderError && (
-          <div className={styles.diag} role="status">
+          <div className={styles.diag} role="alert">
             <p className={styles.diagTitle}>
               WebGL terrain unavailable · {shaderError.stage} shader compile error
             </p>

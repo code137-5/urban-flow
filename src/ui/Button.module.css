@@ -1,16 +1,17 @@
 .btn {
   display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-xxl);
-  min-height: 48px; /* Carbon touch target */
-  padding: 12px 16px;
+  gap: var(--space-md);
+  min-height: var(--control-height-lg); /* Carbon touch target */
+  padding: var(--space-sm) var(--space-md);
   border: 1px solid transparent;
   border-radius: var(--radius-none);
   font: var(--type-body-sm);
   letter-spacing: 0.16px;
   cursor: pointer;
-  transition: background 70ms ease, border-color 70ms ease, color 70ms ease;
+  transition: background var(--duration-fast-01) var(--ease-standard),
+    border-color var(--duration-fast-01) var(--ease-standard),
+    color var(--duration-fast-01) var(--ease-standard);
   text-decoration: none;
   user-select: none;
 }
@@ -19,7 +20,6 @@
 }
 .trailing {
   display: inline-flex;
-  margin-left: var(--space-md);
 }
 
 .primary {
@@ -42,6 +42,9 @@
   background: var(--layer-03);
   color: var(--text-primary);
 }
+.secondary:active {
+  background: var(--layer-hover-01);
+}
 
 .tertiary {
   background: transparent;
@@ -49,18 +52,41 @@
   color: var(--link);
 }
 .tertiary:hover {
-  background: rgba(120, 169, 255, 0.12);
+  background: var(--accent-wash);
   color: var(--link-hover);
   border-color: var(--link-hover);
+}
+.tertiary:active {
+  background: var(--accent-wash-active);
 }
 
 .ghost {
   background: transparent;
   color: var(--link);
   justify-content: flex-start;
-  gap: var(--space-md);
 }
 .ghost:hover {
   background: var(--layer-01);
   color: var(--link-hover);
+}
+.ghost:active {
+  background: var(--layer-02);
+}
+
+/* Disabled — flat --layer-01 fill (transparent variants stay transparent). */
+.btn:disabled,
+.btn[aria-disabled='true'] {
+  background: var(--layer-01);
+  border-color: transparent;
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+.btn:disabled:hover {
+  background: var(--layer-01);
+  color: var(--text-disabled);
+}
+.tertiary:disabled,
+.ghost:disabled {
+  background: transparent;
+  border-color: var(--border-subtle);
 }

@@ -1,15 +1,17 @@
 .headline {
   font: var(--type-display-md);
+  font-size: clamp(30px, 4.5vw, 42px);
+  text-wrap: balance;
   color: var(--text-primary);
-  max-width: 18ch;
+  max-width: var(--measure-heading);
   margin-top: var(--space-xs);
 }
 
 .lead {
   font: var(--type-body-lg);
   color: var(--text-secondary);
-  margin-top: var(--space-md);
-  max-width: 60ch;
+  margin-top: var(--space-lg);
+  max-width: var(--measure-prose);
   margin-bottom: var(--space-xxl);
 }
 
@@ -20,7 +22,7 @@
 .panels {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-md);
+  gap: var(--grid-gutter);
   align-items: stretch;
 }
 
@@ -33,7 +35,7 @@
 
 .panelHead {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-sm);
   padding: var(--space-md);
   border-bottom: 1px solid var(--border-subtle);
@@ -42,9 +44,11 @@
 /* Small flat accent block (0px corners), not a pill. */
 .dot {
   flex: none;
-  width: 10px;
-  height: 10px;
+  width: var(--space-xs);
+  height: var(--space-xs);
   background: var(--link);
+  /* 16px centers the 8px block on the 40px select's first line. */
+  margin-top: var(--space-md);
 }
 
 .panelTitleGroup {
@@ -70,8 +74,8 @@
    label never runs under it. It fills the slot and truncates long labels. */
 .select {
   width: 100%;
-  height: 40px;
-  padding: 0 40px 0 var(--space-md);
+  height: var(--control-height);
+  padding: 0 calc(var(--space-md) + 16px + var(--space-xs)) 0 var(--space-md);
   font: var(--type-body-lg);
   letter-spacing: 0.16px;
   color: var(--text-primary);
@@ -82,14 +86,16 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   overflow: hidden;
-  /* Custom chevron, tinted Gray 30 (#c6c6c6) for the dark field. */
+  /* Custom chevron, tinted Gray 30 (#c6c6c6) for the dark field. The stroke
+     %23c6c6c6 pins to --text-secondary but must stay a literal — CSS custom
+     properties cannot be interpolated inside a data-URI. */
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23c6c6c6' stroke-width='1.5' d='M4 6l4 4 4-4'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right var(--space-md) center;
   -webkit-appearance: none;
   -moz-appearance: none;
   appearance: none;
-  transition: background-color 0.11s;
+  transition: background-color var(--duration-fast-02) var(--ease-standard);
 }
 
 .select:hover {
@@ -121,9 +127,9 @@
   letter-spacing: 0.32px;
   text-transform: uppercase;
   color: var(--text-helper);
-  background: var(--field-01);
+  background: var(--layer-02);
   border: 1px solid var(--border-subtle);
-  padding: 2px var(--space-xs);
+  padding: var(--space-2xs) var(--space-xs);
 }
 
 /* Flat ghost "×" remove control (Carbon icon-button). No corners, no shadow;
@@ -131,23 +137,29 @@
 .remove {
   margin-left: auto;
   flex: none;
+  /* 4px optical nudge to align the × with the select first line. */
+  margin-top: var(--space-xxs);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: var(--control-height-sm);
+  height: var(--control-height-sm);
   font-size: 20px;
   line-height: 1;
   background: transparent;
   border: 1px solid transparent;
   color: var(--text-helper);
   cursor: pointer;
-  transition: background 0.11s, color 0.11s;
+  transition: background var(--duration-fast-02) var(--ease-standard), color var(--duration-fast-02) var(--ease-standard);
 }
 
 .remove:hover:not(:disabled) {
   background: var(--layer-02);
   color: var(--text-primary);
+}
+
+.remove:active:not(:disabled) {
+  background: var(--layer-03);
 }
 
 .remove:focus-visible {
@@ -178,8 +190,8 @@
   inset: 0;
   background: radial-gradient(
     circle at 63% 48%,
-    rgba(15, 98, 254, 0.16),
-    rgba(15, 98, 254, 0) 62%
+    var(--accent-glow),
+    var(--accent-glow-0) 62%
   );
 }
 
@@ -201,7 +213,7 @@
   max-height: 70%;
   overflow: auto;
   padding: var(--space-md);
-  background: rgba(22, 22, 22, 0.92);
+  background: var(--scrim);
   border-top: 1px solid var(--border-subtle);
 }
 
@@ -260,12 +272,16 @@
   color: var(--text-helper);
   cursor: pointer;
   text-align: center;
-  transition: background 0.11s, border-color 0.11s;
+  transition: background var(--duration-fast-02) var(--ease-standard), border-color var(--duration-fast-02) var(--ease-standard);
 }
 
 .addPanel:hover:not(.addPanelMax) {
   background: var(--layer-01);
   border-color: var(--border-strong);
+}
+
+.addPanel:active:not(.addPanelMax) {
+  background: var(--layer-02);
 }
 
 .addPanel:hover:not(.addPanelMax) .plus,
@@ -301,7 +317,7 @@
 .addHint {
   font: var(--type-caption);
   letter-spacing: 0.32px;
-  color: var(--text-placeholder);
+  color: var(--text-helper);
 }
 
 /* Column count is driven inline by Dashboard.tsx (min of the width cap and item
