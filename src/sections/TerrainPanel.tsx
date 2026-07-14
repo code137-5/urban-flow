@@ -28,30 +28,43 @@ const PANEL_VIEW_STATE = {
   zoom: 10.9,
 }
 
-// Interaction bounds. The camera is a constrained turntable: users may zoom and
-// rotate (bearing) only — panning and free-tilt are disabled so Seoul stays
-// framed and centered. Tilt is switched between two fixed presets by the 2D/3D
-// toggle rather than dragged.
+// Interaction bounds. Users may pan, zoom, and rotate (bearing). Pan is
+// soft-bounded: the center is clamped to SEOUL_BOUNDS so the city can't be
+// dragged out of frame. Free-tilt stays disabled — tilt switches between two
+// fixed presets via the 2D/3D toggle rather than being dragged.
 const MIN_ZOOM = 9
 const MAX_ZOOM = 14
 const ZOOM_STEP = 0.6
 const PITCH_3D = 60 // the tilted "contour poster" look
 const PITCH_2D = 0 // top-down plan view
 
+const [BOUND_MIN_LNG, BOUND_MIN_LAT, BOUND_MAX_LNG, BOUND_MAX_LAT] = SEOUL_BOUNDS
+
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
+
+// Soft pan bound: keep the camera center inside Seoul's bounding box so at least
+// the near half of the city stays framed no matter how far the user drags.
+const clampCenter = (lng: number, lat: number): [number, number] => [
+  clamp(lng, BOUND_MIN_LNG, BOUND_MAX_LNG),
+  clamp(lat, BOUND_MIN_LAT, BOUND_MAX_LAT),
+]
 
 // Eased transitions: +/- buttons animate zoom; the 2D/3D toggle animates tilt.
 const zoomInterpolator = new LinearInterpolator(['zoom'])
 const pitchInterpolator = new LinearInterpolator(['pitch'])
 
 /**
- * The user-controllable camera params for a panel: zoom, bearing (rotation), and
- * pitch (2D↔3D). Center is intentionally excluded — each panel keeps its own
- * size-fitted center so panning is impossible and Seoul stays framed. Shared
- * verbatim across panels when the dashboard's "sync views" option is on.
- * Optional transition props ride along so a button/toggle change animates.
+ * The user-controllable camera params for a panel: center (longitude/latitude),
+ * zoom, bearing (rotation), and pitch (2D↔3D). Center is soft-clamped to
+ * SEOUL_BOUNDS (see clampCenter) so a pan can't push Seoul out of frame. A null
+ * PanelCamera means "use the size-fitted view" — the default and reset state.
+ * Shared verbatim across panels when the dashboard's "sync views" option is on,
+ * so linked panels pan/zoom/rotate together. Optional transition props ride along
+ * so a button/toggle change animates.
  */
 export type PanelCamera = {
+  longitude: number
+  latitude: number
   zoom: number
   bearing: number
   pitch: number
@@ -115,6 +128,25 @@ function tuningEnabled(): boolean {
   return new URLSearchParams(window.location.search).has('tune')
 }
 
+/** Crosshair glyph for the "reset view" control — re-centers/re-fits the camera. */
+function RecenterIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.25"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <circle cx="8" cy="8" r="3.25" />
+      <path d="M8 1v2.25M8 12.75V15M1 8h2.25M12.75 8H15" strokeLinecap="square" />
+    </svg>
+  )
+}
+
 /**
  * A single dashboard panel: real deck.gl contour terrain for one `DataSource`.
  * The KDE heightmap + Seoul mask are computed once (deferred a frame so the
@@ -130,10 +162,12 @@ export function TerrainPanel({
   source,
   camera,
   onCameraChange,
+  onResetCamera,
 }: {
   source: DataSource
   camera: PanelCamera | null
   onCameraChange: (camera: PanelCamera) => void
+  onResetCamera: () => void
 }) {
   const [points, setPoints] = useState<GeoPoint[] | null>(null)
   const [heightmap, setHeightmap] = useState<Heightmap | null>(null)
@@ -174,8 +208,10 @@ export function TerrainPanel({
   )
 
   // Effective controllable params: the (possibly shared) camera if set, else the
-  // fit. Center always comes from `fittedView` and is never overridden, so the
-  // panel can't be panned off Seoul.
+  // size-fitted default. Center now rides along too (clamped to Seoul), so a pan
+  // moves the view while the fit still supplies the default/reset framing.
+  const effectiveLng = camera?.longitude ?? fittedView.longitude
+  const effectiveLat = camera?.latitude ?? fittedView.latitude
   const effectiveZoom = camera?.zoom ?? fittedView.zoom
   const effectiveBearing = camera?.bearing ?? fittedView.bearing ?? 0
   const effectivePitch = camera?.pitch ?? fittedView.pitch ?? PITCH_3D
@@ -183,6 +219,8 @@ export function TerrainPanel({
 
   const viewState: MapViewState = {
     ...fittedView,
+    longitude: effectiveLng,
+    latitude: effectiveLat,
     zoom: effectiveZoom,
     bearing: effectiveBearing,
     pitch: effectivePitch,
@@ -194,23 +232,28 @@ export function TerrainPanel({
       : {}),
   }
 
-  // deck.gl reports every camera change here (drag-rotate, wheel-zoom). Emit only
-  // zoom + bearing; pitch is pinned to the current 2D/3D preset so a vertical
-  // drag can't tilt, and center is dropped so the view can't pan. Skip frames
-  // emitted by an in-flight transition so button/toggle animations play out.
+  // deck.gl reports every camera change here (drag-pan, drag-rotate, wheel-zoom).
+  // Emit center (clamped to Seoul), zoom, and bearing; pitch is pinned to the
+  // current 2D/3D preset so a vertical drag can't tilt. Skip frames emitted by an
+  // in-flight transition so button/toggle animations play out.
   const handleViewStateChange = (params: ViewStateChangeParameters) => {
     if (params.interactionState?.inTransition) return
     const v = params.viewState as MapViewState
+    const [longitude, latitude] = clampCenter(v.longitude, v.latitude)
     onCameraChange({
+      longitude,
+      latitude,
       zoom: clamp(v.zoom, MIN_ZOOM, MAX_ZOOM),
       bearing: v.bearing ?? 0,
       pitch: effectivePitch,
     })
   }
 
-  // +/- buttons: nudge zoom with a short transition, preserving rotation + tilt.
+  // +/- buttons: nudge zoom with a short transition, preserving pan + rotation + tilt.
   const nudgeZoom = (delta: number) => {
     onCameraChange({
+      longitude: effectiveLng,
+      latitude: effectiveLat,
       zoom: clamp(effectiveZoom + delta, MIN_ZOOM, MAX_ZOOM),
       bearing: effectiveBearing,
       pitch: effectivePitch,
@@ -220,9 +263,11 @@ export function TerrainPanel({
   }
 
   // 2D/3D toggle: swap between the top-down and tilted presets with an eased
-  // pitch transition, keeping the current zoom + rotation.
+  // pitch transition, keeping the current pan + zoom + rotation.
   const setThreeD = (threeD: boolean) => {
     onCameraChange({
+      longitude: effectiveLng,
+      latitude: effectiveLat,
       zoom: effectiveZoom,
       bearing: effectiveBearing,
       pitch: threeD ? PITCH_3D : PITCH_2D,
@@ -365,12 +410,13 @@ export function TerrainPanel({
         style={{ position: 'absolute', inset: '0' }}
         viewState={viewState}
         onViewStateChange={handleViewStateChange}
-        // Turntable interaction: left-drag rotates (dragMode 'rotate'), scroll /
-        // pinch zooms. Pan is disabled so the terrain stays centered; pitch is
-        // pinned per 2D/3D preset in handleViewStateChange, so drag only rotates.
+        // Interaction: left-drag pans (dragMode 'pan'), ⌘/Ctrl- or right-drag
+        // rotates the bearing, scroll / pinch zooms. Pan is soft-clamped to Seoul
+        // in handleViewStateChange; pitch is pinned per 2D/3D preset there, so a
+        // drag never free-tilts.
         controller={{
-          dragMode: 'rotate',
-          dragPan: false,
+          dragMode: 'pan',
+          dragPan: true,
           dragRotate: true,
           touchRotate: true,
           scrollZoom: true,
@@ -425,6 +471,16 @@ export function TerrainPanel({
               disabled={effectiveZoom <= MIN_ZOOM}
             >
               −
+            </button>
+            <button
+              type="button"
+              className={styles.zoomBtn}
+              aria-label="Reset view"
+              title="Reset view"
+              onClick={onResetCamera}
+              disabled={camera === null}
+            >
+              <RecenterIcon />
             </button>
           </div>
         </>
