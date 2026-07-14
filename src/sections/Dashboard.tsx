@@ -67,13 +67,15 @@ export function Dashboard() {
   const width = useViewportWidth()
   const canAdd = panels.length < MAX_PANELS
 
-  // Camera (zoom/bearing/pitch) per panel, keyed by panel.key; null = "use the
-  // fit". When `linked` is on, every panel reads and writes the FIRST panel's
-  // entry instead of its own, so all views move together — the "sync views"
-  // option. Center is never stored (see PanelCamera), so different-sized cells
-  // still frame Seoul correctly while sharing rotation/zoom/tilt.
+  // Camera (center/zoom/bearing/pitch) per panel, keyed by panel.key; null = "use
+  // the size-fitted view" (also the reset target). When `linked` is on, every
+  // panel reads and writes the FIRST panel's entry instead of its own, so all
+  // views pan/zoom/rotate together — the "sync views" option.
   const [cameras, setCameras] = useState<Record<number, PanelCamera | null>>({})
-  const [linked, setLinked] = useState(false)
+  // Sync-views on by default: added panels start locked to panel 1's camera so
+  // comparisons line up out of the box. The toggle stays disabled until a second
+  // panel exists (nothing to sync with one panel).
+  const [linked, setLinked] = useState(true)
   const firstKey = panels[0]?.key ?? 0
 
   const cameraFor = (key: number): PanelCamera | null => cameras[linked ? firstKey : key] ?? null
@@ -81,6 +83,13 @@ export function Dashboard() {
   const handleCameraChange = (key: number) => (next: PanelCamera) => {
     const target = linked ? firstKey : key
     setCameras((prev) => ({ ...prev, [target]: next }))
+  }
+
+  // Reset a panel back to its size-fitted view (null camera). Honors `linked` so
+  // resetting one synced panel re-fits them all.
+  const handleResetCamera = (key: number) => () => {
+    const target = linked ? firstKey : key
+    setCameras((prev) => ({ ...prev, [target]: null }))
   }
 
   const toggleLinked = () => {
@@ -198,6 +207,7 @@ export function Dashboard() {
                     source={source}
                     camera={cameraFor(panel.key)}
                     onCameraChange={handleCameraChange(panel.key)}
+                    onResetCamera={handleResetCamera(panel.key)}
                   />
                 </div>
 
