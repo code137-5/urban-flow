@@ -10,6 +10,7 @@ import { parkLayer, riverLayer } from '../layers/featureOverlays'
 import { ContourFallback } from './ContourFallback'
 import { terrainShaderSupported } from '../layers/terrainSupport'
 import { shaderErrors, type ShaderError } from '../webgl-compat'
+import { suggestedBrowsersText } from '../browser'
 import type { DataSource, GeoPoint, Heightmap } from '../data/types'
 import styles from './Dashboard.module.css'
 
@@ -126,6 +127,55 @@ function hexToRgba(hex: string, opacity: number): [number, number, number, numbe
 function tuningEnabled(): boolean {
   if (typeof window === 'undefined') return false
   return new URLSearchParams(window.location.search).has('tune')
+}
+
+/**
+ * Friendly notice shown over the SVG fallback when deck.gl can't compile the
+ * terrain shader on this device (typically Chrome on Android via ANGLE). Rather
+ * than dumping the raw driver log at the visitor, it explains the 2D preview and
+ * points to a browser more likely to render the 3D terrain (Safari/Edge), with a
+ * copy-link shortcut so they can reopen the page there. The driver log stays
+ * available, tucked into a collapsed <details> for anyone debugging.
+ */
+function WebglFallbackNotice({ shaderError }: { shaderError: ShaderError | null }) {
+  const [copied, setCopied] = useState(false)
+  const suggestion = suggestedBrowsersText()
+
+  const copyLink = () => {
+    // clipboard may be unavailable on insecure origins — the URL is in the
+    // address bar regardless, so a failure is harmless.
+    navigator.clipboard?.writeText(window.location.href).then(
+      () => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      },
+      () => {},
+    )
+  }
+
+  return (
+    <div className={styles.diag} role="alert">
+      <p className={styles.diagTitle}>3D terrain isn’t available in this browser</p>
+      <p className={styles.diagBody}>
+        This device’s graphics driver couldn’t compile the terrain shaders, so the map
+        above is a simplified 2D preview. For the full 3D contour view, open Urban Flow
+        in {suggestion}.
+      </p>
+      <div className={styles.diagActions}>
+        <button type="button" className={styles.diagBtn} onClick={copyLink}>
+          {copied ? 'Link copied' : 'Copy page link'}
+        </button>
+      </div>
+      {shaderError && (
+        <details className={styles.diagDetails}>
+          <summary className={styles.diagSummary}>
+            Technical details · {shaderError.stage} shader compile error
+          </summary>
+          <pre className={styles.diagLog}>{shaderError.log.trim() || '(empty driver log)'}</pre>
+        </details>
+      )}
+    </div>
+  )
 }
 
 /** Crosshair glyph for the "reset view" control — re-centers/re-fits the camera. */
@@ -392,14 +442,7 @@ export function TerrainPanel({
     return (
       <>
         <ContourFallback />
-        {shaderError && (
-          <div className={styles.diag} role="alert">
-            <p className={styles.diagTitle}>
-              WebGL terrain unavailable · {shaderError.stage} shader compile error
-            </p>
-            <pre className={styles.diagLog}>{shaderError.log.trim() || '(empty driver log)'}</pre>
-          </div>
-        )}
+        <WebglFallbackNotice shaderError={shaderError} />
       </>
     )
   }

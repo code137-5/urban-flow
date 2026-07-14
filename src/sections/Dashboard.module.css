@@ -372,7 +372,10 @@
   opacity: 0.85;
 }
 
-/* On-screen shader-compile diagnostics (mobile has no usable console). */
+/*
+ * WebGL-failure notice shown over the SVG fallback. Explains the 2D preview and
+ * points to Safari/Edge; the raw driver log lives in a collapsed <details>.
+ */
 .diag {
   position: absolute;
   left: 0;
@@ -388,8 +391,49 @@
 .diagTitle {
   font: var(--type-body-sm);
   letter-spacing: 0.16px;
-  color: var(--support-warning);
+  color: var(--text-primary);
   margin-bottom: var(--space-xs);
+}
+
+.diagBody {
+  font: var(--type-body-sm);
+  letter-spacing: 0.16px;
+  color: var(--text-secondary);
+  max-width: 46ch;
+  margin-bottom: var(--space-md);
+}
+
+.diagActions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+/* Flat Carbon ghost button — 0px corners, hairline border, no shadow. */
+.diagBtn {
+  font: var(--type-body-sm);
+  letter-spacing: 0.16px;
+  color: var(--link);
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  padding: var(--space-xs) var(--space-md);
+  cursor: pointer;
+}
+
+.diagBtn:hover {
+  background: var(--layer-02);
+  border-color: var(--border-strong, var(--text-helper));
+}
+
+.diagDetails {
+  margin-top: var(--space-md);
+}
+
+.diagSummary {
+  font: var(--type-caption);
+  letter-spacing: 0.16px;
+  color: var(--text-helper);
+  cursor: pointer;
+  user-select: none;
 }
 
 .diagLog {
@@ -400,7 +444,7 @@
   white-space: pre-wrap;
   word-break: break-word;
   user-select: text;
-  margin: 0;
+  margin: var(--space-xs) 0 0;
 }
 
 /* Shown while the KDE heightmap + Seoul mask build on first paint. */
