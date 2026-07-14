@@ -1,6 +1,6 @@
 .hero {
   position: relative;
-  min-height: 82vh;
+  min-height: 100dvh;
   display: flex;
   align-items: center;
   background: var(--bg);
@@ -51,7 +51,7 @@
 /* ≤672px (Carbon tablet/mobile): scale display type down, stack CTAs. */
 @media (max-width: 672px) {
   .hero {
-    min-height: 80vh;
+    min-height: 100dvh;
   }
 
   .headline {
