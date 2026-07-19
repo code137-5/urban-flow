@@ -109,13 +109,24 @@ function tuningEnabled(): boolean {
   return new URLSearchParams(window.location.search).has('tune')
 }
 
+// With multiple panels mounted, only the first one owns the (dev-only) tuner —
+// six identical lil-gui instances stacked on screen help no one.
+let tunerActive = false
+
 /**
  * A single dashboard panel: real deck.gl contour terrain for one `DataSource`.
  * The KDE heightmap + Seoul mask are computed once (deferred a frame so the
  * loading state paints first), then rendered as a static "contour poster" at the
  * pitched Seoul view. Colors come from `Controls` and are live-tunable via lil-gui.
  */
-export function TerrainPanel({ source }: { source: DataSource }) {
+export function TerrainPanel({
+  source,
+  activePanels = 1,
+}: {
+  source: DataSource
+  /** Live panel count — splits the global particle budget (particleBudget.ts). */
+  activePanels?: number
+}) {
   const [points, setPoints] = useState<GeoPoint[] | null>(null)
   const [heightmap, setHeightmap] = useState<Heightmap | null>(null)
   const [controls, setControls] = useState<Controls>(DEFAULT_CONTROLS)
@@ -177,7 +188,8 @@ export function TerrainPanel({ source }: { source: DataSource }) {
   // ships in the main bundle for normal visitors; mirrors widget values into
   // state so the layers re-render live. Created once; torn down on unmount.
   useEffect(() => {
-    if (!tuningEnabled()) return
+    if (!tuningEnabled() || tunerActive) return
+    tunerActive = true
     let gui: { destroy(): void } | undefined
     let cancelled = false
     void import('lil-gui').then(({ default: GUI }) => {
@@ -221,6 +233,7 @@ export function TerrainPanel({ source }: { source: DataSource }) {
     return () => {
       cancelled = true
       gui?.destroy()
+      tunerActive = false
     }
   }, [])
 
@@ -249,7 +262,7 @@ export function TerrainPanel({ source }: { source: DataSource }) {
             new ParticleLayer({
               id: `particles-${source.meta.id}`,
               heightmap,
-              numParticles: perPanelParticleCount(1, controls.particleCount),
+              numParticles: perPanelParticleCount(activePanels, controls.particleCount),
               // Same knob as the terrain layer → particles always sit on the surface.
               heightScale: controls.height,
               speed: controls.particleSpeed,
@@ -264,7 +277,7 @@ export function TerrainPanel({ source }: { source: DataSource }) {
           ]
         : []),
     ]
-  }, [heightmap, controls, source.meta.id, particlesOk, animate])
+  }, [heightmap, controls, source.meta.id, particlesOk, animate, activePanels])
 
   if (webglFailed) {
     return (

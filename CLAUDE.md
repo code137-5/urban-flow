@@ -6,8 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Urban Flow** — a data-visualization website about Seoul (서울). Seoul data is rendered as
 **contour-line terrain** (등고선) with **GPU particles flowing over it**, plus an interactive
-**comparison dashboard** that starts with one panel and grows to 2–3 as the user adds
-datasets. Three datasets: 따릉이 (public bike) · 생활이동 (population OD) · 지하철 승하차.
+**comparison dashboard** that starts with one panel and grows to **up to 6** as the user adds
+datasets (duplicates allowed once all are shown). Three datasets: 따릉이 (public bike) ·
+생활이동 (population OD) · 지하철 승하차. The global particle budget is split across active
+panels (`src/layers/particleBudget.ts`).
 
 Architecture is based on the experimental repo `Aete/seoul-terrain-animation` (referenced,
 not forked — its data/heightmap/contour pipeline and shaders are the template; its particle
@@ -81,6 +83,7 @@ implementation source of truth. Rules that are easy to violate:
 
 Build in incremental, **visually-verified** steps. Staged plan:
 - **P0** bootstrap · **P1** landing shell (Hero/About/nav) — ✅ done & verified
-- **P2** data layer · **P3** contour terrain · **P4** GPU particles · **P5** dashboard (1→2→3 panels) · **P6** polish + deploy
+- **P2** data layer · **P3** contour terrain · **P4** GPU particles — ✅ done & verified
+- **P5** dashboard (1→6 panels) · **P6** polish + deploy
 
-Next: **P2 data layer**.
+Next: **P5 dashboard growth**, then polish + deploy.

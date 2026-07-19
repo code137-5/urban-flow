@@ -13,10 +13,18 @@
   margin-bottom: var(--space-xxl);
 }
 
-/* One panel now (2.2fr) + a growth-hint tile (1fr). */
+/* One panel (2.2fr) + the add tile (1fr) — the opening composition. */
 .panels {
   display: grid;
   grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr);
+  gap: var(--space-md);
+  align-items: stretch;
+}
+
+/* Two or more panels: uniform two-column grid; the add tile fills a cell. */
+.panelsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-md);
   align-items: stretch;
 }
@@ -154,7 +162,28 @@
   color: var(--text-helper);
 }
 
-/* Growth-hint tile — dashed, non-interactive until P5 wires it up. */
+/* Flat ✕ in the panel header — hairline border, no fill (Carbon ghost button). */
+.removePanel {
+  margin-left: auto;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-helper);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.removePanel:hover {
+  color: var(--text-primary);
+  border-color: var(--border-subtle-02);
+}
+
+/* Add-dataset tile — dashed, interactive. */
 .addPanel {
   display: flex;
   flex-direction: column;
@@ -166,8 +195,22 @@
   background: transparent;
   border: 1px dashed var(--border-subtle-02);
   color: var(--text-helper);
-  cursor: not-allowed;
+  cursor: pointer;
   text-align: center;
+}
+
+.addPanel:hover:not(:disabled) {
+  border-color: var(--link);
+}
+
+.addPanel:hover:not(:disabled) .plus,
+.addPanel:hover:not(:disabled) .addLabel {
+  color: var(--link);
+}
+
+.addPanel:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .plus {
@@ -189,7 +232,8 @@
 }
 
 @media (max-width: 672px) {
-  .panels {
+  .panels,
+  .panelsGrid {
     grid-template-columns: 1fr;
   }
 
