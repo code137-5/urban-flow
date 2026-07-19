@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -b --noEmit",
+    "make-samples": "tsx scripts/make-sample-inputs.ts",
+    "preprocess": "tsx scripts/preprocess/run.ts"
   },
   "dependencies": {
     "@deck.gl/core": "^9.3.6",

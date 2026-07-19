@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import DeckGL from '@deck.gl/react'
-import type { Layer } from '@deck.gl/core'
-import { INITIAL_VIEW_STATE, SEOUL_BOUNDS } from '../config'
+import { LinearInterpolator } from '@deck.gl/core'
+import type { Layer, MapViewState, ViewStateChangeParameters } from '@deck.gl/core'
+import { INITIAL_VIEW_STATE, SEOUL_BOUNDS, fitSeoulViewState } from '../config'
 import { computeHeightmap } from '../data/field'
 import ContourTerrainLayer from '../layers/ContourTerrainLayer'
 import ParticleLayer from '../layers/ParticleLayer'
@@ -20,12 +21,60 @@ import styles from './Dashboard.module.css'
 // ~1s once per session, then cached.
 const GRID_SIZE = 200
 
-// The shared INITIAL_VIEW_STATE frames Seoul for a full-screen canvas; inside a
-// bounded panel it reads low, so tighten zoom and drop the center a touch to fill.
+// Fallback view used before the container has been measured (0×0 during the
+// first render, before layout). The shared INITIAL_VIEW_STATE frames Seoul for a
+// full-screen canvas; inside a bounded panel it reads low, so tighten zoom and
+// drop the center a touch. Once measured, `fitSeoulViewState` replaces this with
+// a size-fitted camera.
 const PANEL_VIEW_STATE = {
   ...INITIAL_VIEW_STATE,
   latitude: 37.535,
   zoom: 10.9,
+}
+
+// Interaction bounds. Users may pan, zoom, rotate (bearing), AND free-tilt
+// (drag pitch) — full free camera control. Pan is soft-bounded: the center is
+// clamped to SEOUL_BOUNDS so the city can't be dragged out of frame. The 2D/3D
+// toggle still jumps between the two pitch presets as shortcuts.
+const MIN_ZOOM = 9
+const MAX_ZOOM = 14
+const ZOOM_STEP = 0.6
+const MAX_PITCH = 60
+const PITCH_3D = 60 // the tilted "contour poster" look
+const PITCH_2D = 0 // top-down plan view
+
+const [BOUND_MIN_LNG, BOUND_MIN_LAT, BOUND_MAX_LNG, BOUND_MAX_LAT] = SEOUL_BOUNDS
+
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
+
+// Soft pan bound: keep the camera center inside Seoul's bounding box so at least
+// the near half of the city stays framed no matter how far the user drags.
+const clampCenter = (lng: number, lat: number): [number, number] => [
+  clamp(lng, BOUND_MIN_LNG, BOUND_MAX_LNG),
+  clamp(lat, BOUND_MIN_LAT, BOUND_MAX_LAT),
+]
+
+// Eased transitions: +/- buttons animate zoom; the 2D/3D toggle animates tilt.
+const zoomInterpolator = new LinearInterpolator(['zoom'])
+const pitchInterpolator = new LinearInterpolator(['pitch'])
+
+/**
+ * The user-controllable camera params for a panel: center (longitude/latitude),
+ * zoom, bearing (rotation), and pitch (2D↔3D). Center is soft-clamped to
+ * SEOUL_BOUNDS (see clampCenter) so a pan can't push Seoul out of frame. A null
+ * PanelCamera means "use the size-fitted view" — the default and reset state.
+ * Shared verbatim across panels when the dashboard's "sync views" option is on,
+ * so linked panels pan/zoom/rotate together. Optional transition props ride along
+ * so a button/toggle change animates.
+ */
+export type PanelCamera = {
+  longitude: number
+  latitude: number
+  zoom: number
+  bearing: number
+  pitch: number
+  transitionDuration?: number
+  transitionInterpolator?: LinearInterpolator
 }
 
 /**
@@ -84,8 +133,8 @@ const DEFAULT_CONTROLS: Controls = {
   particleMaxAge: 300,
 }
 
-// Cap the canvas backing-store resolution: 6 future panels at DPR 3 is what
-// actually kills mobile tabs, not particle counts.
+// Cap the canvas backing-store resolution: 6 panels at DPR 3 is what actually
+// kills mobile tabs, not particle counts.
 const DPR_CAP =
   typeof window === 'undefined'
     ? 1
@@ -113,22 +162,55 @@ function tuningEnabled(): boolean {
 // six identical lil-gui instances stacked on screen help no one.
 let tunerActive = false
 
+/** Crosshair glyph for the "reset view" control — re-centers/re-fits the camera. */
+function RecenterIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.25"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <circle cx="8" cy="8" r="3.25" />
+      <path d="M8 1v2.25M8 12.75V15M1 8h2.25M12.75 8H15" strokeLinecap="square" />
+    </svg>
+  )
+}
+
 /**
- * A single dashboard panel: real deck.gl contour terrain for one `DataSource`.
- * The KDE heightmap + Seoul mask are computed once (deferred a frame so the
- * loading state paints first), then rendered as a static "contour poster" at the
- * pitched Seoul view. Colors come from `Controls` and are live-tunable via lil-gui.
+ * A single dashboard panel: real deck.gl contour terrain for one `DataSource`,
+ * with GPU particles flowing over it (ParticleLayer). The KDE heightmap + Seoul
+ * mask are computed once (deferred a frame so the loading state paints first),
+ * then rendered at the pitched Seoul view. Colors come from `Controls` and are
+ * live-tunable via lil-gui.
+ *
+ * The camera is controlled: `camera` (center/zoom/bearing/pitch) is merged onto
+ * the size-fitted view, and every change is reported via `onCameraChange`. The
+ * dashboard owns this state so it can mirror one panel's camera across all
+ * panels ("sync views"). A null `camera` means "use the fit".
  */
 export function TerrainPanel({
   source,
   activePanels = 1,
+  camera,
+  onCameraChange,
+  onResetCamera,
 }: {
   source: DataSource
   /** Live panel count — splits the global particle budget (particleBudget.ts). */
   activePanels?: number
+  camera: PanelCamera | null
+  onCameraChange: (camera: PanelCamera) => void
+  onResetCamera: () => void
 }) {
   const [points, setPoints] = useState<GeoPoint[] | null>(null)
   const [heightmap, setHeightmap] = useState<Heightmap | null>(null)
+  // Set when source.load() rejects (e.g. a preprocessed static file is missing).
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [controls, setControls] = useState<Controls>(DEFAULT_CONTROLS)
   // If deck.gl can't initialize/compile on this device (some mobile GPUs), fall
   // back to a zero-WebGL SVG contour so the panel is never blank.
@@ -140,6 +222,103 @@ export function TerrainPanel({
   const [particlesOk, setParticlesOk] = useState(true)
   // Pause simulation while the panel is off-screen / tab hidden / reduced motion.
   const { ref: visibilityRef, animate } = usePanelVisibility()
+
+  // The DeckGL container's measured pixel size. Drives the fitted camera so the
+  // whole Seoul area stays framed at any panel width/height. `null` until the
+  // first ResizeObserver callback (guards against 0×0 before layout).
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null)
+
+  // Measure our OWN container (not the window) so a panel in a responsive grid
+  // reframes when its cell grows/shrinks. Recomputes on mount + every resize.
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const ro = new ResizeObserver((entries) => {
+      const r = entries[0]?.contentRect
+      if (!r || r.width === 0 || r.height === 0) return
+      setSize({ width: r.width, height: r.height })
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  // Fitted "contour poster" camera for the current panel size. Falls back to the
+  // sensible default until the container has been measured. This is the *base*
+  // view: it reframes on resize and supplies defaults before the user interacts.
+  const fittedView = useMemo<MapViewState>(
+    () => (size ? fitSeoulViewState(size.width, size.height) : PANEL_VIEW_STATE),
+    [size],
+  )
+
+  // Effective controllable params: the (possibly shared) camera if set, else the
+  // size-fitted default. Center now rides along too (clamped to Seoul), so a pan
+  // moves the view while the fit still supplies the default/reset framing.
+  const effectiveLng = camera?.longitude ?? fittedView.longitude
+  const effectiveLat = camera?.latitude ?? fittedView.latitude
+  const effectiveZoom = camera?.zoom ?? fittedView.zoom
+  const effectiveBearing = camera?.bearing ?? fittedView.bearing ?? 0
+  const effectivePitch = camera?.pitch ?? fittedView.pitch ?? PITCH_3D
+  const is3d = effectivePitch > 0
+
+  const viewState: MapViewState = {
+    ...fittedView,
+    longitude: effectiveLng,
+    latitude: effectiveLat,
+    zoom: effectiveZoom,
+    bearing: effectiveBearing,
+    pitch: effectivePitch,
+    ...(camera?.transitionDuration
+      ? {
+          transitionDuration: camera.transitionDuration,
+          transitionInterpolator: camera.transitionInterpolator,
+        }
+      : {}),
+  }
+
+  // deck.gl reports every camera change here (drag-pan, drag-rotate, wheel-zoom,
+  // drag-tilt). Emit center (clamped to Seoul), zoom, bearing, and pitch —
+  // free-tilt is allowed, clamped to [0, MAX_PITCH]. Skip frames emitted by an
+  // in-flight transition so button/toggle animations play out.
+  const handleViewStateChange = (params: ViewStateChangeParameters) => {
+    if (params.interactionState?.inTransition) return
+    const v = params.viewState as MapViewState
+    const [longitude, latitude] = clampCenter(v.longitude, v.latitude)
+    onCameraChange({
+      longitude,
+      latitude,
+      zoom: clamp(v.zoom, MIN_ZOOM, MAX_ZOOM),
+      bearing: v.bearing ?? 0,
+      pitch: clamp(v.pitch ?? effectivePitch, 0, MAX_PITCH),
+    })
+  }
+
+  // +/- buttons: nudge zoom with a short transition, preserving pan + rotation + tilt.
+  const nudgeZoom = (delta: number) => {
+    onCameraChange({
+      longitude: effectiveLng,
+      latitude: effectiveLat,
+      zoom: clamp(effectiveZoom + delta, MIN_ZOOM, MAX_ZOOM),
+      bearing: effectiveBearing,
+      pitch: effectivePitch,
+      transitionDuration: 200,
+      transitionInterpolator: zoomInterpolator,
+    })
+  }
+
+  // 2D/3D toggle: swap between the top-down and tilted presets with an eased
+  // pitch transition, keeping the current pan + zoom + rotation.
+  const setThreeD = (threeD: boolean) => {
+    onCameraChange({
+      longitude: effectiveLng,
+      latitude: effectiveLat,
+      zoom: effectiveZoom,
+      bearing: effectiveBearing,
+      pitch: threeD ? PITCH_3D : PITCH_2D,
+      transitionDuration: 450,
+      transitionInterpolator: pitchInterpolator,
+    })
+  }
 
   // Probe support once; if it fails, skip deck.gl (avoids the shader-error
   // overlay) and surface the driver's compile log on-screen.
@@ -157,9 +336,16 @@ export function TerrainPanel({
 
   useEffect(() => {
     let alive = true
-    source.load().then((p) => {
-      if (alive) setPoints(p)
-    })
+    setLoadError(null)
+    source.load().then(
+      (p) => {
+        if (alive) setPoints(p)
+      },
+      (err: unknown) => {
+        console.warn(`[urban-flow] failed to load ${source.meta.id}:`, err)
+        if (alive) setLoadError(err instanceof Error ? err.message : String(err))
+      },
+    )
     return () => {
       alive = false
     }
@@ -240,7 +426,7 @@ export function TerrainPanel({
   const layers = useMemo<Layer[]>(() => {
     if (!heightmap) return []
     // Flat z=0 reference plate under the terrain: Seoul outline, then parks and
-    // river; the contour relief (drawn last) sits on top.
+    // river; the contour relief sits on top, with particles above it.
     return [
       seoulBoundaryLayer({
         lineColor: hexToRgba(controls.boundaryColor, controls.boundaryOpacity),
@@ -284,7 +470,7 @@ export function TerrainPanel({
       <>
         <ContourFallback />
         {shaderError && (
-          <div className={styles.diag} role="status">
+          <div className={styles.diag} role="alert">
             <p className={styles.diagTitle}>
               WebGL terrain unavailable · {shaderError.stage} shader compile error
             </p>
@@ -296,16 +482,35 @@ export function TerrainPanel({
   }
 
   return (
-    <>
+    <div ref={containerRef} style={{ position: 'absolute', inset: '0' }}>
       {/* Visibility sentinel: fills the panel so the IntersectionObserver can
           pause the particle simulation when the panel scrolls off-screen. */}
-      <div ref={visibilityRef} style={{ position: 'absolute', inset: '0' }} aria-hidden="true" />
+      <div
+        ref={visibilityRef}
+        style={{ position: 'absolute', inset: '0', pointerEvents: 'none' }}
+        aria-hidden="true"
+      />
       <DeckGL
         style={{ position: 'absolute', inset: '0' }}
-        viewState={PANEL_VIEW_STATE}
-        controller={false}
-        layers={layers}
+        viewState={viewState}
+        onViewStateChange={handleViewStateChange}
         useDevicePixels={DPR_CAP}
+        // Interaction: left-drag pans (dragMode 'pan'), ⌘/Ctrl- or right-drag
+        // rotates bearing AND tilts pitch (free tilt, clamped in
+        // handleViewStateChange), scroll / pinch zooms, double-click zooms in.
+        // Pan is soft-clamped to Seoul in handleViewStateChange.
+        controller={{
+          dragMode: 'pan',
+          dragPan: true,
+          dragRotate: true,
+          touchRotate: true,
+          scrollZoom: true,
+          touchZoom: true,
+          doubleClickZoom: true,
+          keyboard: false,
+          inertia: 250,
+        }}
+        layers={layers}
         onError={(error) => {
           // Shader compile/link or context failure on this device — degrade
           // gracefully instead of leaving the panel blank.
@@ -313,11 +518,63 @@ export function TerrainPanel({
           setWebglFailed(true)
         }}
       />
+      {heightmap && (
+        <>
+          <div className={styles.viewToggle} role="group" aria-label="View angle">
+            <button
+              type="button"
+              className={`${styles.viewBtn} ${!is3d ? styles.viewBtnActive : ''}`}
+              aria-pressed={!is3d}
+              onClick={() => setThreeD(false)}
+            >
+              2D
+            </button>
+            <button
+              type="button"
+              className={`${styles.viewBtn} ${is3d ? styles.viewBtnActive : ''}`}
+              aria-pressed={is3d}
+              onClick={() => setThreeD(true)}
+            >
+              3D
+            </button>
+          </div>
+          <div className={styles.zoomControls}>
+            <button
+              type="button"
+              className={styles.zoomBtn}
+              aria-label="Zoom in"
+              onClick={() => nudgeZoom(ZOOM_STEP)}
+              disabled={effectiveZoom >= MAX_ZOOM}
+            >
+              +
+            </button>
+            <button
+              type="button"
+              className={styles.zoomBtn}
+              aria-label="Zoom out"
+              onClick={() => nudgeZoom(-ZOOM_STEP)}
+              disabled={effectiveZoom <= MIN_ZOOM}
+            >
+              −
+            </button>
+            <button
+              type="button"
+              className={styles.zoomBtn}
+              aria-label="Reset view"
+              title="Reset view"
+              onClick={onResetCamera}
+              disabled={camera === null}
+            >
+              <RecenterIcon />
+            </button>
+          </div>
+        </>
+      )}
       {!heightmap && (
         <div className={styles.loading} role="status">
-          Building terrain…
+          {loadError ? `Failed to load data — ${loadError}` : 'Building terrain…'}
         </div>
       )}
-    </>
+    </div>
   )
 }

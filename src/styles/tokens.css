@@ -26,6 +26,7 @@
   --text-placeholder: #6f6f6f;
   --text-disabled: #525252;
   --text-on-color: #ffffff;
+  --text-brand-max: #ffffff; /* brighter than --text-primary; ONLY the two brand wordmarks */
 
   /* ---- Border / hairline ---- */
   --border-subtle: #393939;
@@ -40,7 +41,13 @@
   --button-primary-hover: #0353e9;
   --button-primary-active: #002d9c;
   --focus: #ffffff;
-  --focus-inset: #161616;
+
+  /* ---- Accent washes & scrim (Blue-only, per single-accent rule) ---- */
+  --accent-wash: rgba(120, 169, 255, 0.12); /* Blue 40 @ 12% — tertiary hover fill */
+  --accent-wash-active: rgba(120, 169, 255, 0.2); /* Blue 40 @ 20% — pressed step */
+  --accent-glow: rgba(15, 98, 254, 0.16); /* Blue 60 @ 16% — canvas elevation wash */
+  --accent-glow-0: rgba(15, 98, 254, 0); /* transparent Blue 60 — gradient fade stop */
+  --scrim: rgba(22, 22, 22, 0.92); /* --bg @ 92% — overlay/diagnostics scrim */
 
   /* ---- Semantic ---- */
   --support-error: #fa4d56;
@@ -66,6 +73,7 @@
   --type-caption: 400 12px/1.33 var(--font-sans);
 
   /* ---- Spacing (Carbon 4px grid) ---- */
+  --space-2xs: 2px; /* Carbon spacing-01 — ONLY sub-grid step, for dense tag/badge insets */
   --space-xxs: 4px;
   --space-xs: 8px;
   --space-sm: 12px;
@@ -79,6 +87,25 @@
   --radius-none: 0px;
   --radius-xs: 2px;
   --radius-sm: 4px;
+
+  /* ---- Motion (Carbon productive durations + easings) ---- */
+  --duration-fast-01: 70ms; /* micro color/border hovers */
+  --duration-fast-02: 110ms; /* field/tile hovers */
+  --duration-moderate-01: 150ms; /* larger transitions (panel add/remove, particle fades) */
+  --ease-standard: cubic-bezier(0.2, 0, 0.38, 0.9); /* standard-productive */
+  --ease-entrance: cubic-bezier(0, 0, 0.38, 0.9); /* entrance-productive */
+  --ease-exit: cubic-bezier(0.2, 0, 1, 0.9); /* exit-productive */
+
+  /* ---- Control heights (Carbon field/button sizes) ---- */
+  --control-height-sm: 32px; /* sm icon-button */
+  --control-height: 40px; /* md field */
+  --control-height-lg: 48px; /* lg field/button */
+
+  /* ---- Measure (content caps) ---- */
+  --measure-hero: 56rem; /* hero content-container cap */
+  --measure-prose: 60ch; /* body-lead line-length cap */
+  --measure-heading: 20ch; /* display-md headline cap */
+  --grid-gutter: var(--space-md); /* single grid gutter (16px) */
 
   /* ---- Layout ---- */
   --container-max: 1584px; /* Carbon max grid */

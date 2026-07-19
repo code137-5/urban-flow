@@ -10,12 +10,19 @@ in vec3 positions64Low;
 // mobile GPUs often can't sample float textures in the vertex stage.
 in float heightVal;
 
+// Per-vertex slope factor: |∇h| normalized to the field mean (~1.0 at a typical
+// slope). Baked on the CPU in buildGridMesh; used by the fragment shader to keep
+// contour lines a uniform screen-space thickness regardless of local slope.
+in float slopeVal;
+
 out float vHeight;
 out float vMask;
+out float vSlope;
 
 void main(void) {
   vMask = step(0.0, heightVal);
   vHeight = max(heightVal, 0.0);
+  vSlope = slopeVal;
 
   geometry.worldPosition = positions;
   geometry.uv = vec2(0.0);

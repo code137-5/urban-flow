@@ -1,31 +1,89 @@
 .headline {
   font: var(--type-display-md);
+  font-size: clamp(30px, 4.5vw, 42px);
+  text-wrap: balance;
   color: var(--text-primary);
-  max-width: 18ch;
+  max-width: var(--measure-heading);
   margin-top: var(--space-xs);
 }
 
 .lead {
   font: var(--type-body-lg);
   color: var(--text-secondary);
-  margin-top: var(--space-md);
-  max-width: 60ch;
+  margin-top: var(--space-lg);
+  max-width: var(--measure-prose);
   margin-bottom: var(--space-xxl);
 }
 
-/* One panel (2.2fr) + the add tile (1fr) — the opening composition. */
-.panels {
-  display: grid;
-  grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr);
-  gap: var(--space-md);
-  align-items: stretch;
+/* Toolbar above the panel grid — holds the cross-panel "sync views" toggle,
+   right-aligned. */
+.toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--space-md);
 }
 
-/* Two or more panels: uniform two-column grid; the add tile fills a cell. */
-.panelsGrid {
+/* Carbon-style checkbox row on dark: flat 0px box, 1px hairline, a light fill +
+   dark check when on. Disabled (single panel) reads muted. */
+.syncToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font: var(--type-body-sm);
+  letter-spacing: 0.16px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.syncCheckbox {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--field-01);
+  border: 1px solid var(--border-strong);
+  cursor: pointer;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  transition: background var(--duration-fast-02) var(--ease-standard), border-color var(--duration-fast-02) var(--ease-standard);
+}
+
+.syncCheckbox:checked {
+  background: var(--link);
+  border-color: var(--link);
+  /* White check mark (inline SVG data-URI). */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23161616' stroke-width='1.75' d='M4 8.5l2.5 2.5L12 5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.syncCheckbox:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.syncToggle:has(.syncCheckbox:disabled) {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+.syncCheckbox:disabled {
+  border-color: var(--border-subtle);
+  cursor: not-allowed;
+}
+
+/* Responsive panel grid. `grid-template-columns` is set inline by Dashboard.tsx
+   as repeat(N, minmax(0, 1fr)) — N is min(width cap, item count), so panels wrap
+   to new rows past 3 and never overflow or leave empty tracks. minmax(0, 1fr)
+   lets each cell shrink below its content width instead of pushing the row wide. */
+.panels {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--space-md);
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--grid-gutter);
   align-items: stretch;
 }
 
@@ -38,7 +96,7 @@
 
 .panelHead {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-sm);
   padding: var(--space-md);
   border-bottom: 1px solid var(--border-subtle);
@@ -47,18 +105,77 @@
 /* Small flat accent block (0px corners), not a pill. */
 .dot {
   flex: none;
-  width: 10px;
-  height: 10px;
+  width: var(--space-xs);
+  height: var(--space-xs);
   background: var(--link);
+  /* 16px centers the 8px block on the 40px select's first line. */
+  margin-top: var(--space-md);
 }
 
 .panelTitleGroup {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* Placeholder slot for the Task 4 dataset dropdown. For now it just wraps the
+   static source label; keep it a distinct element so the <select> can drop in. */
+.selectorSlot {
   min-width: 0;
 }
 
 .panelTitle {
   font: var(--type-body-lg);
   color: var(--text-primary);
+}
+
+/* Per-panel dataset dropdown. Carbon field look on dark: flat 0px corners, no
+   shadow, a --field-01 body with a strong bottom hairline (Carbon's dropdown
+   underline). Native chrome is removed and a custom chevron (inline SVG data-URI,
+   Gray 30 stroke) is painted on the right, with matching right padding so the
+   label never runs under it. It fills the slot and truncates long labels. */
+.select {
+  width: 100%;
+  height: var(--control-height);
+  /* No left inset: the selected label shares its left edge with the subtitle
+     below and sits a clean 12px (--space-sm gap) from the dot, so the header
+     reads as one column — dot · title / subtitle. Right inset clears the chevron. */
+  padding: 0 calc(var(--space-md) + 16px + var(--space-xs)) 0 0;
+  font: var(--type-body-lg);
+  letter-spacing: 0.16px;
+  color: var(--text-primary);
+  background-color: var(--field-01);
+  border: none;
+  border-bottom: 1px solid var(--border-strong);
+  cursor: pointer;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  /* Custom chevron, tinted Gray 30 (#c6c6c6) for the dark field. The stroke
+     %23c6c6c6 pins to --text-secondary but must stay a literal — CSS custom
+     properties cannot be interpolated inside a data-URI. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23c6c6c6' stroke-width='1.5' d='M4 6l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--space-md) center;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  transition: background-color var(--duration-fast-02) var(--ease-standard);
+}
+
+.select:hover {
+  background-color: var(--layer-hover-01);
+}
+
+.select:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* The dropdown list itself renders with the OS/UA popup; force dark colors on
+   the options so it stays legible on the Gray 100 theme where the UA honors it. */
+.select option {
+  color: var(--text-primary);
+  background-color: var(--field-01);
 }
 
 .panelSub {
@@ -74,17 +191,62 @@
   letter-spacing: 0.32px;
   text-transform: uppercase;
   color: var(--text-helper);
-  background: var(--field-01);
+  background: var(--layer-02);
   border: 1px solid var(--border-subtle);
-  padding: 2px var(--space-xs);
+  padding: var(--space-2xs) var(--space-xs);
 }
 
-/* The visualization canvas sits directly on --bg, per the design system. */
+/* Flat ghost "×" remove control (Carbon icon-button). No corners, no shadow;
+   a subtle layer-02 wash on hover. Disabled (last remaining panel) reads muted. */
+.remove {
+  margin-left: auto;
+  flex: none;
+  /* 4px optical nudge to align the × with the select first line. */
+  margin-top: var(--space-xxs);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height-sm);
+  height: var(--control-height-sm);
+  font-size: 20px;
+  line-height: 1;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-helper);
+  cursor: pointer;
+  transition: background var(--duration-fast-02) var(--ease-standard), color var(--duration-fast-02) var(--ease-standard);
+}
+
+.remove:hover:not(:disabled) {
+  background: var(--layer-02);
+  color: var(--text-primary);
+}
+
+.remove:active:not(:disabled) {
+  background: var(--layer-03);
+}
+
+.remove:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.remove:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+/* The visualization canvas sits directly on --bg, per the design system. A
+   max-height keeps a single full-width panel from becoming absurdly tall while
+   the 4/3 aspect ratio governs multi-column cells. */
 .canvas {
   position: relative;
   aspect-ratio: 4 / 3;
+  max-height: 520px;
   background: var(--bg);
   overflow: hidden;
+  /* Drag-to-rotate shouldn't select panel text if the pointer leaves the canvas. */
+  user-select: none;
 }
 
 /* Faint blue elevation wash under the contours. */
@@ -94,9 +256,111 @@
   inset: 0;
   background: radial-gradient(
     circle at 63% 48%,
-    rgba(15, 98, 254, 0.16),
-    rgba(15, 98, 254, 0) 62%
+    var(--accent-glow),
+    var(--accent-glow-0) 62%
   );
+}
+
+/* Stacked +/- zoom controls, bottom-right of the canvas. Carbon icon-button
+   look: flat 0px corners, no shadow, a --layer-02 body inside one --border-subtle
+   hairline with the two buttons split by a divider. */
+.zoomControls {
+  position: absolute;
+  right: var(--space-sm);
+  bottom: var(--space-sm);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  background: var(--layer-02);
+  border: 1px solid var(--border-subtle);
+}
+
+.zoomBtn {
+  width: var(--control-height-sm);
+  height: var(--control-height-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  line-height: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--duration-fast-02) var(--ease-standard), color var(--duration-fast-02) var(--ease-standard);
+}
+
+.zoomBtn + .zoomBtn {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.zoomBtn:hover:not(:disabled) {
+  background: var(--layer-hover-01);
+  color: var(--text-primary);
+}
+
+.zoomBtn:active:not(:disabled) {
+  background: var(--layer-03);
+}
+
+.zoomBtn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.zoomBtn:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+/* 2D / 3D view-angle toggle, bottom-left of the canvas (mirrors the zoom
+   controls). Carbon content-switcher look: two flat cells sharing one hairline
+   border; the active cell inverts to a light fill. */
+.viewToggle {
+  position: absolute;
+  left: var(--space-sm);
+  bottom: var(--space-sm);
+  z-index: 2;
+  display: flex;
+  border: 1px solid var(--border-subtle);
+  background: var(--layer-02);
+}
+
+.viewBtn {
+  min-width: calc(var(--control-height-sm) + var(--space-xs));
+  height: var(--control-height-sm);
+  padding: 0 var(--space-xs);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: var(--type-caption);
+  letter-spacing: 0.32px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--duration-fast-02) var(--ease-standard), color var(--duration-fast-02) var(--ease-standard);
+}
+
+.viewBtn + .viewBtn {
+  border-left: 1px solid var(--border-subtle);
+}
+
+.viewBtn:hover:not(.viewBtnActive) {
+  background: var(--layer-hover-01);
+  color: var(--text-primary);
+}
+
+.viewBtn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* Active angle — inverted, the one high-contrast cell. */
+.viewBtnActive {
+  background: var(--text-primary);
+  color: var(--bg);
+  cursor: default;
 }
 
 /* Zero-WebGL SVG contour shown if deck.gl fails to initialize on a device. */
@@ -117,7 +381,7 @@
   max-height: 70%;
   overflow: auto;
   padding: var(--space-md);
-  background: rgba(22, 22, 22, 0.92);
+  background: var(--scrim);
   border-top: 1px solid var(--border-subtle);
 }
 
@@ -162,28 +426,7 @@
   color: var(--text-helper);
 }
 
-/* Flat ✕ in the panel header — hairline border, no fill (Carbon ghost button). */
-.removePanel {
-  margin-left: auto;
-  flex: none;
-  width: 32px;
-  height: 32px;
-  display: grid;
-  place-items: center;
-  background: transparent;
-  border: 1px solid var(--border-subtle);
-  color: var(--text-helper);
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.removePanel:hover {
-  color: var(--text-primary);
-  border-color: var(--border-subtle-02);
-}
-
-/* Add-dataset tile — dashed, interactive. */
+/* Add-dataset tile — dashed, interactive, the trailing cell of the grid. */
 .addPanel {
   display: flex;
   flex-direction: column;
@@ -197,20 +440,34 @@
   color: var(--text-helper);
   cursor: pointer;
   text-align: center;
+  transition: background var(--duration-fast-02) var(--ease-standard), border-color var(--duration-fast-02) var(--ease-standard);
 }
 
-.addPanel:hover:not(:disabled) {
-  border-color: var(--link);
+.addPanel:hover:not(.addPanelMax) {
+  background: var(--layer-01);
+  border-color: var(--border-strong);
 }
 
-.addPanel:hover:not(:disabled) .plus,
-.addPanel:hover:not(:disabled) .addLabel {
+.addPanel:active:not(.addPanelMax) {
+  background: var(--layer-02);
+}
+
+.addPanel:hover:not(.addPanelMax) .plus,
+.addPanel:hover:not(.addPanelMax) .addLabel {
   color: var(--link);
 }
 
-.addPanel:disabled {
+.addPanel:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* Cap reached (6 panels) — non-interactive, clearly disabled. */
+.addPanelMax {
   cursor: not-allowed;
-  opacity: 0.6;
+  border-style: solid;
+  border-color: var(--border-subtle);
+  color: var(--text-disabled);
 }
 
 .plus {
@@ -228,15 +485,13 @@
 .addHint {
   font: var(--type-caption);
   letter-spacing: 0.32px;
-  color: var(--text-placeholder);
+  color: var(--text-helper);
 }
 
+/* Column count is driven inline by Dashboard.tsx (min of the width cap and item
+   count), which already collapses to 1 on mobile — no column override needed
+   here; just tighten the add tile on small screens. */
 @media (max-width: 672px) {
-  .panels,
-  .panelsGrid {
-    grid-template-columns: 1fr;
-  }
-
   .addPanel {
     min-height: 120px;
   }

@@ -23,7 +23,17 @@ export interface GeoPoint {
 }
 
 /** Identifiers for the datasets compared in the dashboard. */
-export type DatasetId = 'ttareungi' | 'saenghwal-idong' | 'subway'
+export type DatasetId =
+  | 'ttareungi'
+  | 'saenghwal-idong'
+  | 'subway'
+  // Preprocessed datasets loaded from public/data/<id>.json (see scripts/preprocess).
+  | 'dem'
+  | 'saenghwal-ingu'
+  | 'jumin-ingu'
+  | 'building-density'
+  | 'residential-density'
+  | 'commercial-density'
 
 export interface DatasetMeta {
   id: DatasetId

@@ -1,22 +1,22 @@
-import type { DataSource, GeoPoint, HourlyWeights } from '../types'
+import type { DataSource, GeoPoint } from '../types'
+import { SEOUL_BOUNDS } from '../../config'
 
 /**
- * Saenghwal-idong (생활이동) — population origin–destination movement.
+ * Synthetic "Living Migration (생활이동)" dataset — Seoul population OD flow.
  *
- * Synthetic mock data, generated deterministically in code (seeded RNG) instead
- * of a CSV: ~140 weighted points clustered around the three big employment
- * centers (Gangnam, Yeouido, Jongno/City Hall) plus low-weight background
- * scatter across Seoul. Weights are in the same order of magnitude as the
- * ttareungi mock (the KDE p99-normalizes, so only relative shape matters).
- * A real adapter would aggregate the open 생활이동 OD dataset the same way.
+ * No real data file — points are generated deterministically from a seeded PRNG
+ * so the terrain is stable across reloads (bare Math.random is forbidden here).
+ * The spatial signature is intentionally DISTINCT from Ttareungi and Subway:
+ * broad, SMOOTH spread — strong central-business cores plus a diffuse residential
+ * background blanketing the bounds, so the contours read as gentle rolling
+ * terrain rather than isolated spikes.
  */
 
-const BOUNDS = { minLng: 126.76, minLat: 37.42, maxLng: 127.18, maxLat: 37.7 }
-
-/** Deterministic 32-bit PRNG (mulberry32). */
+/** mulberry32 — tiny deterministic PRNG. Returns floats in [0, 1). */
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0
   return () => {
+    a |= 0
     a = (a + 0x6d2b79f5) | 0
     let t = Math.imul(a ^ (a >>> 15), 1 | a)
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
@@ -24,74 +24,41 @@ function mulberry32(seed: number): () => number {
   }
 }
 
-/** Standard-normal sample (Box–Muller) driven by the seeded RNG. */
-function gaussian(rng: () => number): number {
-  const u = Math.max(rng(), 1e-9)
-  const v = rng()
-  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v)
-}
-
-const clamp = (x: number, lo: number, hi: number) => Math.min(Math.max(x, lo), hi)
-
-/**
- * Commute-shaped hourly profile: morning (h8) and evening (h18) peaks with a
- * midday shoulder. Distributes `weight` across 24 hours (rounded).
- */
-function hourlyProfile(weight: number, rng: () => number): HourlyWeights {
-  const bump = (h: number, center: number, sigma: number) =>
-    Math.exp(-((h - center) ** 2) / (2 * sigma * sigma))
-  const raw: number[] = []
-  for (let h = 0; h < 24; h++) {
-    const shape = 0.05 + bump(h, 8, 1.6) + 0.9 * bump(h, 18, 2.0) + 0.25 * bump(h, 13, 3.0)
-    raw.push(shape * (0.85 + 0.3 * rng()))
-  }
-  const sum = raw.reduce((s, x) => s + x, 0)
-  return raw.map((x) => Math.round((x / sum) * weight))
-}
-
-interface Cluster {
-  lng: number
-  lat: number
-  /** Spatial std-dev in degrees. */
-  spread: number
-  count: number
-  /** Peak weight at cluster core. */
-  peak: number
-}
-
-// Employment/activity centers — deliberately a different spatial pattern from
-// the ttareungi mock (which leans Hongdae/Jamsil/riverside leisure spots).
-const CLUSTERS: Cluster[] = [
-  { lng: 127.03, lat: 37.5, spread: 0.02, count: 40, peak: 24000 }, // Gangnam
-  { lng: 126.92, lat: 37.52, spread: 0.013, count: 30, peak: 15000 }, // Yeouido
-  { lng: 126.98, lat: 37.57, spread: 0.017, count: 35, peak: 18000 }, // Jongno / City Hall
+/** CBD cores: [lng, lat, weight]. Broad, moderate-high, wide scatter. */
+const CORES: readonly [number, number, number][] = [
+  [126.99, 37.565, 620], // Jung-gu (historic CBD)
+  [127.028, 37.498, 560], // Gangnam business district
+  [126.924, 37.521, 480], // Yeouido (finance)
 ]
 
-const BACKGROUND_COUNT = 35
+const CORE_COUNT = 90 // clustered around the three cores
+const BACKGROUND_COUNT = 60 // diffuse residential fill across the bounds
+const [MIN_LNG, MIN_LAT, MAX_LNG, MAX_LAT] = SEOUL_BOUNDS
 
 function generate(): GeoPoint[] {
-  const rng = mulberry32(0x5e0421) // fixed seed — deterministic output
+  const rand = mulberry32(0xba_da55)
   const points: GeoPoint[] = []
 
-  for (const c of CLUSTERS) {
-    for (let i = 0; i < c.count; i++) {
-      const dLng = gaussian(rng) * c.spread
-      const dLat = gaussian(rng) * c.spread * 0.8
-      const lng = clamp(c.lng + dLng, BOUNDS.minLng, BOUNDS.maxLng)
-      const lat = clamp(c.lat + dLat, BOUNDS.minLat, BOUNDS.maxLat)
-      // Weight falls off with distance from the cluster core.
-      const d2 = (dLng / c.spread) ** 2 + (dLat / (c.spread * 0.8)) ** 2
-      const weight = Math.max(20, Math.round(c.peak * Math.exp(-d2 / 2) * (0.6 + 0.8 * rng())))
-      points.push({ lng, lat, weight, weightByHour: hourlyProfile(weight, rng) })
-    }
+  // Broad Gaussian clusters over each core — larger sigma than Subway so the
+  // heightmap stays smooth and rounded rather than spiky.
+  for (let i = 0; i < CORE_COUNT; i++) {
+    const [clng, clat, base] = CORES[i % CORES.length]
+    const r = Math.sqrt(-2 * Math.log(rand() + 1e-9))
+    const theta = 2 * Math.PI * rand()
+    const sigma = 0.018
+    const lng = clng + r * Math.cos(theta) * sigma
+    const lat = clat + r * Math.sin(theta) * sigma * 0.8
+    const weight = Math.round(base * (0.5 + 0.5 * rand()))
+    points.push({ lng, lat, weight })
   }
 
-  // Low-weight background scatter across the whole city.
+  // Diffuse low-weight residential background so migration covers the whole city
+  // instead of only the cores — this is what visually separates it from Subway.
   for (let i = 0; i < BACKGROUND_COUNT; i++) {
-    const lng = BOUNDS.minLng + rng() * (BOUNDS.maxLng - BOUNDS.minLng)
-    const lat = BOUNDS.minLat + rng() * (BOUNDS.maxLat - BOUNDS.minLat)
-    const weight = Math.round(30 + rng() * 600)
-    points.push({ lng, lat, weight, weightByHour: hourlyProfile(weight, rng) })
+    const lng = MIN_LNG + (MAX_LNG - MIN_LNG) * rand()
+    const lat = MIN_LAT + (MAX_LAT - MIN_LAT) * rand()
+    const weight = Math.round(60 + 120 * rand())
+    points.push({ lng, lat, weight })
   }
 
   return points
@@ -100,10 +67,10 @@ function generate(): GeoPoint[] {
 export const saenghwalIdongSource: DataSource = {
   meta: {
     id: 'saenghwal-idong',
-    label: 'Saenghwal-idong (population OD)',
-    description: 'Where Seoul moves between home and work',
-    unit: 'trips',
-    accent: '#ff7eb6', // IBM Magenta 40
+    label: 'Living Migration (생활이동)',
+    description: 'Population OD flow across central cores and suburbs',
+    unit: 'people moved',
+    accent: '#a6c8ff', // IBM Blue 30 — in-palette, lighter than the other two
   },
   load: async () => generate(),
 }

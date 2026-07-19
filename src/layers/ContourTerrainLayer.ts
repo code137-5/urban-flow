@@ -37,6 +37,13 @@ type GridMesh = {
   positions: Float64Array
   /** Per-vertex heightmap value (−1 = masked), baked as an attribute. */
   heights: Float32Array
+  /**
+   * Per-vertex slope factor: |∇h| (normalized-height gradient magnitude, in
+   * physical per-meter units) divided by the field mean, so ~1.0 at a typical
+   * slope. Used to keep contour lines a uniform SCREEN/WORLD thickness instead
+   * of a uniform HEIGHT band (which reads thick on flats, thin on steeps).
+   */
+  slope: Float32Array
   indices: Uint32Array
   vertexCount: number
 }
@@ -44,6 +51,8 @@ type GridMesh = {
 /**
  * Build a cell-centered grid mesh (LNGLAT) matching the heightmap layout, with
  * the height baked into a per-vertex attribute (NOT a texture — see class doc).
+ * Also bakes a per-vertex slope factor (|∇h| normalized to the field mean) so
+ * the fragment shader can draw slope-invariant, uniformly-thick contour lines.
  */
 function buildGridMesh(heightmap: Heightmap): GridMesh {
   const { width: W, height: H, bounds, data } = heightmap
@@ -64,6 +73,8 @@ function buildGridMesh(heightmap: Heightmap): GridMesh {
     }
   }
 
+  const slope = buildSlopeFactors(data, W, H, spanLng, spanLat, (minLat + maxLat) / 2)
+
   const indices = new Uint32Array((W - 1) * (H - 1) * 6)
   let t = 0
   for (let j = 0; j < H - 1; j++) {
@@ -80,7 +91,77 @@ function buildGridMesh(heightmap: Heightmap): GridMesh {
       indices[t++] = c
     }
   }
-  return { positions, heights, indices, vertexCount: indices.length }
+  return { positions, heights, slope, indices, vertexCount: indices.length }
+}
+
+/**
+ * Compute a per-vertex slope factor from the normalized height grid.
+ *
+ * The contour band in the fragment shader is measured in HEIGHT units, so on a
+ * displaced surface a fixed band maps to a screen width ∝ 1/|slope|: flats read
+ * thick, steeps read thin. To cancel that, we bake |∇h| here (central
+ * differences over neighboring cells, converted to physical per-meter units so
+ * the N–S vs E–W cell-size anisotropy doesn't distort it) and normalize it to
+ * the field mean, giving ~1.0 at a typical slope. The shader divides the
+ * height-space distance-to-contour by this factor, turning the metric
+ * slope-invariant so every line renders at the same apparent thickness.
+ *
+ * Masked cells (−1) get factor 1.0 (they're discarded anyway); masked/edge
+ * neighbors fall back to the center value so the difference degrades to a
+ * one-sided estimate instead of a spurious −1→h cliff.
+ */
+function buildSlopeFactors(
+  data: Float32Array,
+  W: number,
+  H: number,
+  spanLng: number,
+  spanLat: number,
+  centerLat: number,
+): Float32Array {
+  const grad = new Float32Array(W * H)
+  // Physical spacing between adjacent cell centers, in meters.
+  const dxMeters = (spanLng / W) * 111320 * Math.cos((centerLat * Math.PI) / 180)
+  const dyMeters = (spanLat / H) * 110540
+  // Guard against degenerate bounds so the divisions below stay finite.
+  const invDx = dxMeters > 1e-6 ? 1 / (2 * dxMeters) : 0
+  const invDy = dyMeters > 1e-6 ? 1 / (2 * dyMeters) : 0
+
+  let sum = 0
+  let count = 0
+  for (let j = 0; j < H; j++) {
+    for (let i = 0; i < W; i++) {
+      const k = j * W + i
+      const hc = data[k]
+      if (hc < 0) {
+        grad[k] = 1
+        continue
+      }
+      // Neighbor heights, substituting the center value where a neighbor is
+      // off-grid or masked (−1) so we never differentiate across the mask edge.
+      const xp = i + 1 < W && data[k + 1] >= 0 ? data[k + 1] : hc
+      const xn = i - 1 >= 0 && data[k - 1] >= 0 ? data[k - 1] : hc
+      const yp = j + 1 < H && data[k + W] >= 0 ? data[k + W] : hc
+      const yn = j - 1 >= 0 && data[k - W] >= 0 ? data[k - W] : hc
+      const gx = (xp - xn) * invDx
+      const gy = (yp - yn) * invDy
+      const g = Math.sqrt(gx * gx + gy * gy)
+      grad[k] = g
+      // Average only over cells with real relief so the flat noise-floor
+      // doesn't drag the reference slope toward zero.
+      if (hc > 0.1) {
+        sum += g
+        count += 1
+      }
+    }
+  }
+
+  const mean = count > 0 && sum > 0 ? sum / count : 1
+  // Normalize to the field mean → factor ≈ 1.0 at a typical slope, which keeps
+  // the existing `lineWidth` default meaningful. Masked cells already hold 1.0.
+  for (let k = 0; k < grad.length; k++) {
+    if (data[k] >= 0) grad[k] /= mean
+  }
+  return grad
 }
 
 /**
@@ -128,6 +209,11 @@ export default class ContourTerrainLayer extends Layer<ContourTerrainLayerProps>
       heightVal: {
         size: 1,
         update: (attr) => (attr.value = this.state.mesh!.heights),
+        noAlloc: true,
+      },
+      slopeVal: {
+        size: 1,
+        update: (attr) => (attr.value = this.state.mesh!.slope),
         noAlloc: true,
       },
     })
