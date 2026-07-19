@@ -135,7 +135,7 @@ const DEFAULT_CONTROLS: Controls = {
   riverOpacity: 0.42,
   particlesOn: true,
   particleCount: 1000,
-  particleSpeed: 1000,
+  particleSpeed: 700,
   particleJitter: 0,
   particleFlowBlend: 0, // 0 = flow along contour lines, 1 = straight uphill
   particleSize: 4.5,

@@ -53,7 +53,7 @@ export type ParticleLayerProps = {
 const defaultProps: DefaultProps<ParticleLayerProps> = {
   numParticles: { type: 'number', value: 1000 },
   heightScale: { type: 'number', value: 4000 },
-  speed: { type: 'number', value: 1000 },
+  speed: { type: 'number', value: 700 },
   jitter: { type: 'number', value: 0 },
   flowBlend: { type: 'number', value: 0 },
   maxAge: { type: 'number', value: 800 },
