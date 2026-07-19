@@ -1,0 +1,52 @@
+/* Full-viewport scrim: one step of darkening over the page, no blur. */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg);
+  background: rgba(22, 22, 22, 0.72);
+}
+
+/* Carbon Gray 100 dialog: flat 0px corners, hairline border, NO shadow —
+   hierarchy comes from the surface step (--layer-01 over the scrim). */
+.dialog {
+  max-width: 480px;
+  width: 100%;
+  background: var(--layer-01);
+  border: 1px solid var(--border-subtle);
+  padding: var(--space-lg);
+}
+
+.eyebrow {
+  font: var(--type-caption);
+  letter-spacing: 0.32px;
+  text-transform: uppercase;
+  color: var(--text-helper);
+  margin-bottom: var(--space-xs);
+}
+
+.title {
+  font: var(--type-card-title);
+  color: var(--text-primary);
+  margin-bottom: var(--space-md);
+}
+
+.body {
+  font: var(--type-body);
+  letter-spacing: 0.16px;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-lg);
+}
+
+.body strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+}

@@ -26,7 +26,7 @@ export function Hero() {
     <div className={styles.hero}>
       <Container>
         <div className={styles.content}>
-          <Eyebrow>Seoul, read as terrain</Eyebrow>
+          <Eyebrow>Seoul, read as terrain and flow</Eyebrow>
 
           <h1 className={styles.headline}>Urban Flow</h1>
 
