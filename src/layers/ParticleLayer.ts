@@ -36,7 +36,7 @@ export type ParticleLayerProps = {
   glow?: number
   /** Trail (ghost afterimage) strength 0–1; 0 disables the history draws. */
   trail?: number
-  /** Number of ghost snapshots in the trail (1–6). Change = history realloc. */
+  /** Number of ghost snapshots in the trail (1–12). Change = history realloc. */
   trailLength?: number
   /** Simulation steps between snapshots — spacing of the ghosts. */
   trailGap?: number
@@ -53,17 +53,17 @@ export type ParticleLayerProps = {
 const defaultProps: DefaultProps<ParticleLayerProps> = {
   numParticles: { type: 'number', value: 4000 },
   heightScale: { type: 'number', value: 4000 },
-  speed: { type: 'number', value: 600 },
-  jitter: { type: 'number', value: 0.25 },
+  speed: { type: 'number', value: 1300 },
+  jitter: { type: 'number', value: 0 },
   flowBlend: { type: 'number', value: 0 },
-  maxAge: { type: 'number', value: 300 },
+  maxAge: { type: 'number', value: 800 },
   fadeFrames: { type: 'number', value: 30 },
   pointSize: { type: 'number', value: 3 },
   sizeVariation: { type: 'number', value: 0.5 },
   glow: { type: 'number', value: 0.6 },
-  trail: { type: 'number', value: 0.5 },
-  trailLength: { type: 'number', value: 3 },
-  trailGap: { type: 'number', value: 2 },
+  trail: { type: 'number', value: 0.7 },
+  trailLength: { type: 'number', value: 6 },
+  trailGap: { type: 'number', value: 4 },
   color: { type: 'color', value: [120, 169, 255] }, // IBM Blue 40, the design system link color
   zOffset: { type: 'number', value: 15 },
   animate: true,
@@ -200,7 +200,7 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
         const t = (i + 1) / n
         model.setAttributes({ positions: slot })
         model.shaderInputs.setProps({
-          particle: this._uniformValues(0, trail * (0.1 + 0.3 * t), 0.5 + 0.35 * t),
+          particle: this._uniformValues(0, trail * (0.15 + 0.45 * t), 0.45 + 0.4 * t),
         })
         model.draw(this.context.renderPass)
       }

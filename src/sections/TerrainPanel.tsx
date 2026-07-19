@@ -128,17 +128,17 @@ const DEFAULT_CONTROLS: Controls = {
   riverOpacity: 0.42,
   particlesOn: true,
   particleCount: 2000,
-  particleSpeed: 600,
-  particleJitter: 0.25,
+  particleSpeed: 1300,
+  particleJitter: 0,
   particleFlowBlend: 0, // 0 = flow along contour lines, 1 = straight uphill
   particleSize: 4.5,
   particleGlow: 0.6, // halo strength — overlapping particles bloom additively
-  particleTrail: 0.5, // ghost-afterimage strength (0 = off)
-  particleTrailLength: 3, // ghost snapshots in the trail
-  particleTrailGap: 2, // sim steps between snapshots (spacing)
+  particleTrail: 0.7, // ghost-afterimage strength (0 = off)
+  particleTrailLength: 6, // ghost snapshots in the trail
+  particleTrailGap: 4, // sim steps between snapshots (spacing)
   particleColor: '#78a9ff', // IBM Blue 40 — the design system's one accent
   particleOpacity: 0.85,
-  particleMaxAge: 300,
+  particleMaxAge: 800,
 }
 
 // Cap the canvas backing-store resolution: 6 panels at DPR 3 is what actually
@@ -422,8 +422,8 @@ export function TerrainPanel({
       pt.add(s, 'particleSize', 1, 8, 0.5).name('size (px)').onChange(sync)
       pt.add(s, 'particleGlow', 0, 1, 0.05).name('glow').onChange(sync)
       pt.add(s, 'particleTrail', 0, 1, 0.05).name('trail').onChange(sync)
-      pt.add(s, 'particleTrailLength', 1, 6, 1).name('trail length').onChange(sync)
-      pt.add(s, 'particleTrailGap', 1, 8, 1).name('trail gap (steps)').onChange(sync)
+      pt.add(s, 'particleTrailLength', 1, 12, 1).name('trail length').onChange(sync)
+      pt.add(s, 'particleTrailGap', 1, 12, 1).name('trail gap (steps)').onChange(sync)
       pt.addColor(s, 'particleColor').name('color').onChange(sync)
       pt.add(s, 'particleOpacity', 0, 1, 0.05).name('opacity').onChange(sync)
       pt.add(s, 'particleMaxAge', 60, 900, 30).name('lifetime (frames)').onChange(sync)
