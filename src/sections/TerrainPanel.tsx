@@ -4,10 +4,14 @@ import type { Layer } from '@deck.gl/core'
 import { INITIAL_VIEW_STATE, SEOUL_BOUNDS } from '../config'
 import { computeHeightmap } from '../data/field'
 import ContourTerrainLayer from '../layers/ContourTerrainLayer'
+import ParticleLayer from '../layers/ParticleLayer'
 import { seoulBoundaryLayer } from '../layers/seoulBoundaryLayer'
 import { parkLayer, riverLayer } from '../layers/featureOverlays'
 import { ContourFallback } from './ContourFallback'
 import { terrainShaderSupported } from '../layers/terrainSupport'
+import { particlesSupported } from '../layers/particleSupport'
+import { detectGpuTier, perPanelParticleCount } from '../layers/particleBudget'
+import { usePanelVisibility } from '../hooks/usePanelVisibility'
 import { shaderErrors, type ShaderError } from '../webgl-compat'
 import type { DataSource, GeoPoint, Heightmap } from '../data/types'
 import styles from './Dashboard.module.css'
@@ -43,6 +47,15 @@ type Controls = {
   parkOpacity: number
   riverColor: string
   riverOpacity: number
+  particlesOn: boolean
+  particleCount: number
+  particleSpeed: number
+  particleJitter: number
+  particleFlowBlend: number
+  particleSize: number
+  particleColor: string
+  particleOpacity: number
+  particleMaxAge: number
 }
 
 const DEFAULT_CONTROLS: Controls = {
@@ -60,7 +73,23 @@ const DEFAULT_CONTROLS: Controls = {
   parkOpacity: 0.26,
   riverColor: '#4a80b0', // saturated slate-blue — the one accent color
   riverOpacity: 0.42,
+  particlesOn: true,
+  particleCount: 4000,
+  particleSpeed: 600,
+  particleJitter: 0.25,
+  particleFlowBlend: 0, // 0 = flow along contour lines, 1 = straight uphill
+  particleSize: 3,
+  particleColor: '#78a9ff', // IBM Blue 40 — the design system's one accent
+  particleOpacity: 0.85,
+  particleMaxAge: 300,
 }
+
+// Cap the canvas backing-store resolution: 6 future panels at DPR 3 is what
+// actually kills mobile tabs, not particle counts.
+const DPR_CAP =
+  typeof window === 'undefined'
+    ? 1
+    : Math.min(window.devicePixelRatio || 1, detectGpuTier() === 'mobile' ? 1.5 : 2)
 
 /** Hex '#rrggbb' → [r, g, b] 0–255. */
 function hexToRgb(hex: string): [number, number, number] {
@@ -95,11 +124,17 @@ export function TerrainPanel({ source }: { source: DataSource }) {
   const [webglFailed, setWebglFailed] = useState(false)
   // Captured shader compile error (for on-screen diagnostics on mobile).
   const [shaderError, setShaderError] = useState<ShaderError | null>(null)
+  // Particle probe result. Failure disables ONLY the particles — the terrain
+  // still renders (never the SVG fallback for a particle-only failure).
+  const [particlesOk, setParticlesOk] = useState(true)
+  // Pause simulation while the panel is off-screen / tab hidden / reduced motion.
+  const { ref: visibilityRef, animate } = usePanelVisibility()
 
   // Probe support once; if it fails, skip deck.gl (avoids the shader-error
   // overlay) and surface the driver's compile log on-screen.
   useEffect(() => {
     if (!terrainShaderSupported()) setWebglFailed(true)
+    if (!particlesSupported()) setParticlesOk(false)
     if (shaderErrors.length) setShaderError(shaderErrors[shaderErrors.length - 1])
     const onErr = (e: Event) => {
       setShaderError((e as CustomEvent<ShaderError>).detail)
@@ -171,6 +206,17 @@ export function TerrainPanel({ source }: { source: DataSource }) {
       const r = g.addFolder('river')
       r.addColor(s, 'riverColor').name('fill').onChange(sync)
       r.add(s, 'riverOpacity', 0, 1, 0.01).name('opacity').onChange(sync)
+
+      const pt = g.addFolder('particles')
+      pt.add(s, 'particlesOn').name('enabled').onChange(sync)
+      pt.add(s, 'particleCount', 500, 8000, 500).name('count').onChange(sync)
+      pt.add(s, 'particleSpeed', 0, 2000, 50).name('speed (m/s)').onChange(sync)
+      pt.add(s, 'particleJitter', 0, 1, 0.05).name('jitter').onChange(sync)
+      pt.add(s, 'particleFlowBlend', 0, 1, 0.05).name('flow → uphill').onChange(sync)
+      pt.add(s, 'particleSize', 1, 8, 0.5).name('size (px)').onChange(sync)
+      pt.addColor(s, 'particleColor').name('color').onChange(sync)
+      pt.add(s, 'particleOpacity', 0, 1, 0.05).name('opacity').onChange(sync)
+      pt.add(s, 'particleMaxAge', 60, 900, 30).name('lifetime (frames)').onChange(sync)
     })
     return () => {
       cancelled = true
@@ -198,8 +244,27 @@ export function TerrainPanel({ source }: { source: DataSource }) {
         peakColor: hexToRgb(controls.peakColor),
         opacity: controls.contourOpacity,
       }),
+      ...(particlesOk && controls.particlesOn
+        ? [
+            new ParticleLayer({
+              id: `particles-${source.meta.id}`,
+              heightmap,
+              numParticles: perPanelParticleCount(1, controls.particleCount),
+              // Same knob as the terrain layer → particles always sit on the surface.
+              heightScale: controls.height,
+              speed: controls.particleSpeed,
+              jitter: controls.particleJitter,
+              flowBlend: controls.particleFlowBlend,
+              maxAge: controls.particleMaxAge,
+              pointSize: controls.particleSize,
+              color: hexToRgb(controls.particleColor),
+              opacity: controls.particleOpacity,
+              animate,
+            }),
+          ]
+        : []),
     ]
-  }, [heightmap, controls, source.meta.id])
+  }, [heightmap, controls, source.meta.id, particlesOk, animate])
 
   if (webglFailed) {
     return (
@@ -219,11 +284,15 @@ export function TerrainPanel({ source }: { source: DataSource }) {
 
   return (
     <>
+      {/* Visibility sentinel: fills the panel so the IntersectionObserver can
+          pause the particle simulation when the panel scrolls off-screen. */}
+      <div ref={visibilityRef} style={{ position: 'absolute', inset: '0' }} aria-hidden="true" />
       <DeckGL
         style={{ position: 'absolute', inset: '0' }}
         viewState={PANEL_VIEW_STATE}
         controller={false}
         layers={layers}
+        useDevicePixels={DPR_CAP}
         onError={(error) => {
           // Shader compile/link or context failure on this device — degrade
           // gracefully instead of leaving the panel blank.

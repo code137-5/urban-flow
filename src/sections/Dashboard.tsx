@@ -39,7 +39,7 @@ export function Dashboard() {
 
             <footer className={styles.panelMeta}>
               <span>Unit · {meta.unit}</span>
-              <span>Contour terrain (KDE) · particles coming soon</span>
+              <span>Contour terrain (KDE) · GPU particle flow</span>
             </footer>
           </article>
 
