@@ -127,8 +127,8 @@ const DEFAULT_CONTROLS: Controls = {
   riverColor: '#9aa9b7', // desaturated steel gray
   riverOpacity: 0.42,
   particlesOn: true,
-  particleCount: 2000,
-  particleSpeed: 1300,
+  particleCount: 1000,
+  particleSpeed: 1000,
   particleJitter: 0,
   particleFlowBlend: 0, // 0 = flow along contour lines, 1 = straight uphill
   particleSize: 4.5,
