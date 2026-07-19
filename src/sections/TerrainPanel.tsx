@@ -134,9 +134,9 @@ const DEFAULT_CONTROLS: Controls = {
   particleSize: 4.5,
   particleGlow: 0.6, // halo strength — overlapping particles bloom additively
   particleTrail: 0.7, // ghost-afterimage strength (0 = off)
-  particleTrailLength: 6, // ghost snapshots in the trail
-  particleTrailGap: 4, // sim steps between snapshots (spacing)
-  particleColor: '#78a9ff', // IBM Blue 40 — the design system's one accent
+  particleTrailLength: 8, // ghost snapshots in the trail
+  particleTrailGap: 6, // sim steps between snapshots (spacing)
+  particleColor: '#ff8880', // warm coral — pops against the cool monochrome terrain
   particleOpacity: 0.85,
   particleMaxAge: 800,
 }
@@ -421,7 +421,7 @@ export function TerrainPanel({
       pt.add(s, 'particleFlowBlend', 0, 1, 0.05).name('flow → uphill').onChange(sync)
       pt.add(s, 'particleSize', 1, 8, 0.5).name('size (px)').onChange(sync)
       pt.add(s, 'particleGlow', 0, 1, 0.05).name('glow').onChange(sync)
-      pt.add(s, 'particleTrail', 0, 1, 0.05).name('trail').onChange(sync)
+      pt.add(s, 'particleTrail', 0, 1, 0.05).name('trail opacity').onChange(sync)
       pt.add(s, 'particleTrailLength', 1, 12, 1).name('trail length').onChange(sync)
       pt.add(s, 'particleTrailGap', 1, 12, 1).name('trail gap (steps)').onChange(sync)
       pt.addColor(s, 'particleColor').name('color').onChange(sync)

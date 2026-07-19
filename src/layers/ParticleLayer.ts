@@ -62,9 +62,9 @@ const defaultProps: DefaultProps<ParticleLayerProps> = {
   sizeVariation: { type: 'number', value: 0.5 },
   glow: { type: 'number', value: 0.6 },
   trail: { type: 'number', value: 0.7 },
-  trailLength: { type: 'number', value: 6 },
-  trailGap: { type: 'number', value: 4 },
-  color: { type: 'color', value: [120, 169, 255] }, // IBM Blue 40, the design system link color
+  trailLength: { type: 'number', value: 8 },
+  trailGap: { type: 'number', value: 6 },
+  color: { type: 'color', value: [255, 136, 128] }, // warm coral — pops against the cool monochrome terrain
   zOffset: { type: 'number', value: 15 },
   animate: true,
   maxFps: { type: 'number', value: 30 },

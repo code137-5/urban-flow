@@ -40,6 +40,13 @@ void main(void) {
   float ja = hash(inSeed + uv + tSeed) * 6.2831853;
   dir += particle.motion.y * vec2(cos(ja), sin(ja)) * max(length(grad), 0.05);
 
+  // Normalize to unit direction so every particle travels at the configured
+  // speed — un-normalized, velocity scaled with |gradient| (≤1, often ~0.2),
+  // which made motion crawl and squashed the trail ghosts into sub-pixel
+  // spacing. Near-zero gradients (flats, peak plateaus) stay parked.
+  float dirLen = length(dir);
+  dir = dirLen > 1e-4 ? dir / dirLen : vec2(0.0);
+
   // meters/s → UV/s per axis (lng/lat anisotropy corrected), × dt.
   vec2 newUv = uv + dir * particle.motion.x * particle.motion.w
              * vec2(particle.scale.x, particle.scale.y);
