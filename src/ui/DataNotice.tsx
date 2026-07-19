@@ -2,35 +2,17 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from './Button'
 import styles from './DataNotice.module.css'
 
-// Shown once per browser session (sessionStorage), so reloads inside one visit
-// don't nag but a fresh visit still gets the disclosure.
-const DISMISS_KEY = 'uf-data-notice-dismissed'
-
-function alreadyDismissed(): boolean {
-  try {
-    return sessionStorage.getItem(DISMISS_KEY) === '1'
-  } catch {
-    return false // storage blocked (private mode) — just show it
-  }
-}
-
 /**
- * First-visit notice: every dataset on the dashboard is currently synthetic,
- * to be swapped for real Seoul open data one by one. Carbon Gray 100 dialog —
- * flat 0px corners, hairline border, no shadow (surface steps only).
+ * Load-time notice: every dataset on the dashboard is currently synthetic,
+ * to be swapped for real Seoul open data one by one. Shown on EVERY page
+ * load / new window (no dismissal persistence — per product decision).
+ * Carbon Gray 100 dialog — flat 0px corners, hairline border, no shadow.
  */
 export function DataNotice() {
-  const [open, setOpen] = useState(() => !alreadyDismissed())
+  const [open, setOpen] = useState(true)
   const buttonRef = useRef<HTMLDivElement | null>(null)
 
-  const dismiss = () => {
-    setOpen(false)
-    try {
-      sessionStorage.setItem(DISMISS_KEY, '1')
-    } catch {
-      // storage blocked — dismissal just won't persist across reloads
-    }
-  }
+  const dismiss = () => setOpen(false)
 
   // Focus the confirm button on open; ESC dismisses.
   useEffect(() => {
