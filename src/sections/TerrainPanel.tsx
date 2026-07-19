@@ -123,11 +123,11 @@ const DEFAULT_CONTROLS: Controls = {
   riverColor: '#9aa9b7', // desaturated steel gray
   riverOpacity: 0.42,
   particlesOn: true,
-  particleCount: 4000,
+  particleCount: 2000,
   particleSpeed: 600,
   particleJitter: 0.25,
   particleFlowBlend: 0, // 0 = flow along contour lines, 1 = straight uphill
-  particleSize: 3,
+  particleSize: 4.5,
   particleColor: '#78a9ff', // IBM Blue 40 — the design system's one accent
   particleOpacity: 0.85,
   particleMaxAge: 300,
