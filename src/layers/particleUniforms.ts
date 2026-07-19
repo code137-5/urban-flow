@@ -15,7 +15,7 @@ export type ParticleProps = {
   lifecycle: [number, number, number, number]
   /** Particle color, RGB 0–1 + base alpha. */
   color: [number, number, number, number]
-  /** Point size (px), size variation 0–1, unused, unused. */
+  /** Point size (px), size variation 0–1, glow strength 0–1, unused. */
   sprite: [number, number, number, number]
 }
 

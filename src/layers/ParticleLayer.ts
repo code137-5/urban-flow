@@ -32,6 +32,10 @@ export type ParticleLayerProps = {
   pointSize?: number
   /** Per-particle size variation, 0–1. */
   sizeVariation?: number
+  /** Halo strength 0–1 — overlapping halos bloom under additive blending. */
+  glow?: number
+  /** Trail (ghost afterimage) strength 0–1; 0 disables the history draws. */
+  trail?: number
   /** Sprite color (RGB 0–255). */
   color?: [number, number, number]
   /** Meters above the terrain surface (avoids z-fighting the contour lines). */
@@ -52,6 +56,8 @@ const defaultProps: DefaultProps<ParticleLayerProps> = {
   fadeFrames: { type: 'number', value: 30 },
   pointSize: { type: 'number', value: 3 },
   sizeVariation: { type: 'number', value: 0.5 },
+  glow: { type: 'number', value: 0.6 },
+  trail: { type: 'number', value: 0.5 },
   color: { type: 'color', value: [120, 169, 255] }, // IBM Blue 40, the design system link color
   zOffset: { type: 'number', value: 15 },
   animate: true,
@@ -123,6 +129,10 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
 
   declare state: {
     buffers?: [Buffer, Buffer]
+    /** Snapshot ring for trails — copies of past particle state (~2 steps apart). */
+    history?: Buffer[]
+    historyHead: number
+    stepCount: number
     seedBuffer?: Buffer
     flowTexture?: Texture
     flowField?: FlowField
@@ -142,6 +152,8 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     this.state.current = 0
     this.state.stepScheduled = false
     this.state.lastStepTime = 0
+    this.state.historyHead = 0
+    this.state.stepCount = 0
   }
 
   updateState(params: UpdateParameters<this>) {
@@ -166,8 +178,25 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
   }
 
   draw() {
-    const { model, buffers, current } = this.state
+    const { model, buffers, current, history, historyHead } = this.state
     if (!model || !buffers) return
+    const trail = this.props.trail ?? 0.5
+
+    // Trails: draw past snapshots first (oldest → newest), dimmer and smaller,
+    // so the live particles render on top of their own afterimages.
+    if (trail > 0 && history) {
+      const alphaRamp = [0.15, 0.25, 0.4]
+      const sizeRamp = [0.55, 0.7, 0.85]
+      for (let i = 0; i < history.length; i++) {
+        const slot = history[(historyHead + i) % history.length]
+        model.setAttributes({ positions: slot })
+        model.shaderInputs.setProps({
+          particle: this._uniformValues(0, trail * alphaRamp[i], sizeRamp[i]),
+        })
+        model.draw(this.context.renderPass)
+      }
+    }
+
     // Re-bind every frame: never draw the buffer registered as the TF output.
     model.setAttributes({ positions: buffers[current] })
     model.shaderInputs.setProps({ particle: this._uniformValues(0) })
@@ -194,6 +223,13 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
 
     const buffers: [Buffer, Buffer] = [
       device.createBuffer({ data: positions }),
+      device.createBuffer({ data: positions.slice() }),
+    ]
+    // Trail snapshots start coincident with the live particles (no artifacts on
+    // the first frames); they diverge as the ring rotates.
+    const history = [
+      device.createBuffer({ data: positions.slice() }),
+      device.createBuffer({ data: positions.slice() }),
       device.createBuffer({ data: positions.slice() }),
     ]
     const seedBuffer = device.createBuffer({ data: seeds })
@@ -240,6 +276,9 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     model.setAttributes({ seeds: seedBuffer })
 
     this.state.buffers = buffers
+    this.state.history = history
+    this.state.historyHead = 0
+    this.state.stepCount = 0
     this.state.seedBuffer = seedBuffer
     this.state.flowTexture = flowTexture
     this.state.flowField = flowField
@@ -262,6 +301,7 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     const { positions } = seedParticles(heightmap, this.props.numParticles!, this.props.maxAge!)
     buffers[0].write(positions)
     buffers[1].write(positions)
+    this.state.history?.forEach((b) => b.write(positions))
     this.state.current = 0
   }
 
@@ -284,11 +324,13 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     this.state.transform?.destroy()
     this.state.model?.destroy()
     this.state.buffers?.forEach((b) => b.destroy())
+    this.state.history?.forEach((b) => b.destroy())
     this.state.seedBuffer?.destroy()
     this.state.flowTexture?.destroy()
     this.state.transform = undefined
     this.state.model = undefined
     this.state.buffers = undefined
+    this.state.history = undefined
     this.state.seedBuffer = undefined
     this.state.flowTexture = undefined
   }
@@ -324,10 +366,28 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
       clearStencil: false,
     })
     this.state.current = 1 - current
+
+    // Rotate a state snapshot into the trail ring every other step (~15 Hz) so
+    // the ghost afterimages sit a visible distance behind the live particles.
+    this.state.stepCount += 1
+    const { history } = this.state
+    if (history && (this.props.trail ?? 0.5) > 0 && this.state.stepCount % 2 === 0) {
+      const target = history[this.state.historyHead]
+      const encoder = this.context.device.createCommandEncoder()
+      encoder.copyBufferToBuffer({
+        sourceBuffer: this.state.buffers![this.state.current],
+        destinationBuffer: target,
+        size: target.byteLength,
+      })
+      encoder.finish()
+      encoder.destroy()
+      this.state.historyHead = (this.state.historyHead + 1) % history.length
+    }
+
     this.setNeedsRedraw()
   }
 
-  private _uniformValues(dt: number): ParticleUniformValues {
+  private _uniformValues(dt: number, alphaScale = 1, sizeScale = 1): ParticleUniformValues {
     const { heightmap } = this.props
     const flowField = this.state.flowField!
     const [minLng, minLat, maxLng, maxLat] = heightmap.bounds
@@ -340,6 +400,7 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
       fadeFrames = 30,
       pointSize = 3,
       sizeVariation = 0.5,
+      glow = 0.6,
       color = [120, 169, 255],
       zOffset = 15,
     } = this.props
@@ -349,8 +410,8 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
       motion: [speed, jitter, flowBlend, dt],
       // Wrapped time (float precision) + respawn-age randomization fraction.
       lifecycle: [maxAge, (performance.now() / 1000) % 3600, 0.95, fadeFrames],
-      color: [color[0] / 255, color[1] / 255, color[2] / 255, 1],
-      sprite: [pointSize, sizeVariation, 0, 0],
+      color: [color[0] / 255, color[1] / 255, color[2] / 255, alphaScale],
+      sprite: [pointSize * sizeScale, sizeVariation, glow, 0],
     }
   }
 }

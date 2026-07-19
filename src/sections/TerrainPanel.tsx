@@ -102,6 +102,8 @@ type Controls = {
   particleJitter: number
   particleFlowBlend: number
   particleSize: number
+  particleGlow: number
+  particleTrail: number
   particleColor: string
   particleOpacity: number
   particleMaxAge: number
@@ -128,6 +130,8 @@ const DEFAULT_CONTROLS: Controls = {
   particleJitter: 0.25,
   particleFlowBlend: 0, // 0 = flow along contour lines, 1 = straight uphill
   particleSize: 4.5,
+  particleGlow: 0.6, // halo strength — overlapping particles bloom additively
+  particleTrail: 0.5, // ghost-afterimage strength (0 = off)
   particleColor: '#78a9ff', // IBM Blue 40 — the design system's one accent
   particleOpacity: 0.85,
   particleMaxAge: 300,
@@ -412,6 +416,8 @@ export function TerrainPanel({
       pt.add(s, 'particleJitter', 0, 1, 0.05).name('jitter').onChange(sync)
       pt.add(s, 'particleFlowBlend', 0, 1, 0.05).name('flow → uphill').onChange(sync)
       pt.add(s, 'particleSize', 1, 8, 0.5).name('size (px)').onChange(sync)
+      pt.add(s, 'particleGlow', 0, 1, 0.05).name('glow').onChange(sync)
+      pt.add(s, 'particleTrail', 0, 1, 0.05).name('trail').onChange(sync)
       pt.addColor(s, 'particleColor').name('color').onChange(sync)
       pt.add(s, 'particleOpacity', 0, 1, 0.05).name('opacity').onChange(sync)
       pt.add(s, 'particleMaxAge', 60, 900, 30).name('lifetime (frames)').onChange(sync)
@@ -456,6 +462,8 @@ export function TerrainPanel({
               flowBlend: controls.particleFlowBlend,
               maxAge: controls.particleMaxAge,
               pointSize: controls.particleSize,
+              glow: controls.particleGlow,
+              trail: controls.particleTrail,
               color: hexToRgb(controls.particleColor),
               opacity: controls.particleOpacity,
               animate,

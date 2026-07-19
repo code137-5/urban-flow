@@ -28,8 +28,11 @@ void main(void) {
                                    particle.lifecycle.x, positions.w);
   vAlpha = fadeIn * fadeOut * (1.0 - hidden);
 
-  // Slight per-particle size variation from the static seed.
-  gl_PointSize = particle.sprite.x * (1.0 - 0.5 * particle.sprite.y + particle.sprite.y * seeds.x);
+  // Slight per-particle size variation from the static seed. Doubled so the
+  // fragment shader has room for a wide glow halo around the core dot —
+  // overlapping halos accumulate under additive blending.
+  gl_PointSize =
+    particle.sprite.x * (1.0 - 0.5 * particle.sprite.y + particle.sprite.y * seeds.x) * 2.0;
 
   vec4 color = vec4(0.0);
   DECKGL_FILTER_COLOR(color, geometry);
