@@ -118,7 +118,7 @@ const DEFAULT_CONTROLS: Controls = {
   contourOpacity: 1,
   boundaryColor: '#525252',
   boundaryOpacity: 0.67,
-  parkColor: '#819cb9', // cool blue-gray
+  parkColor: '#819c89', // muted gray-green
   parkOpacity: 0.13,
   riverColor: '#9aa9b7', // desaturated steel gray
   riverOpacity: 0.42,
