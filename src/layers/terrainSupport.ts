@@ -23,6 +23,7 @@ layout(std140) uniform terrainUniforms {
   float heightScale;
   float interval;
   float lineWidth;
+  float capOpacity;
   vec4 lineColor;
   vec4 peakColor;
 } terrain;

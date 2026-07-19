@@ -19,6 +19,8 @@ export type ContourTerrainLayerProps = {
   interval?: number
   /** Line half-width, in fractions of a contour interval (0–0.5). */
   lineWidth?: number
+  /** Opacity of the saturated summit plateau (p99-clipped to 1.0); 0 = removed. */
+  capOpacity?: number
   /** Line color at height 0 (RGB 0–255). */
   lineColor?: [number, number, number]
   /** Line color at height 1 (RGB 0–255). */
@@ -29,6 +31,7 @@ const defaultProps: DefaultProps<ContourTerrainLayerProps> = {
   heightScale: { type: 'number', value: 4000 },
   interval: { type: 'number', value: 0.06 },
   lineWidth: { type: 'number', value: 0.04 },
+  capOpacity: { type: 'number', value: 0.2 },
   lineColor: { type: 'color', value: [251, 191, 36] },
   peakColor: { type: 'color', value: [125, 211, 252] },
 }
@@ -245,6 +248,7 @@ export default class ContourTerrainLayer extends Layer<ContourTerrainLayerProps>
       heightScale = 4000,
       interval = 0.06,
       lineWidth = 0.04,
+      capOpacity = 0.2,
       lineColor = [251, 191, 36],
       peakColor = [125, 211, 252],
     } = this.props
@@ -253,6 +257,7 @@ export default class ContourTerrainLayer extends Layer<ContourTerrainLayerProps>
         heightScale,
         interval,
         lineWidth,
+        capOpacity,
         // Pad RGB (0–255) → vec4 in 0–1; alpha unused (RGB is read in the shader).
         lineColor: [...lineColor.map((x) => x / 255), 1] as [number, number, number, number],
         peakColor: [...peakColor.map((x) => x / 255), 1] as [number, number, number, number],

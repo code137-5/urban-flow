@@ -88,6 +88,7 @@ type Controls = {
   height: number
   sigma: number
   lineWidth: number
+  capOpacity: number
   lineColor: string
   peakColor: string
   contourOpacity: number
@@ -118,9 +119,11 @@ const DEFAULT_CONTROLS: Controls = {
   // KDE bandwidth (m). ~1800m makes the field read as continuous terrain
   // rather than isolated peaks over flat ground (tuned in the reference).
   sigma: 1800,
-  // Contour half-width in interval units (ContourTerrainLayer default 0.04);
+  // Contour half-width in interval units (hairline look, tuned by the user);
   // the shader keeps thickness slope-invariant, this scales it overall.
-  lineWidth: 0.04,
+  lineWidth: 0.01,
+  // Saturated summit plateau (마루) opacity — 0 removes the filled cap.
+  capOpacity: 0.2,
   lineColor: '#393939', // low elevation — dark hairline gray
   peakColor: '#c6c6c6', // high elevation — light gray
   contourOpacity: 1,
@@ -402,6 +405,7 @@ export function TerrainPanel({
       c.add(s, 'height', 0, 10000, 100).name('height (m)').onChange(sync)
       c.add(s, 'sigma', 300, 2500, 50).name('KDE σ (m)').onChange(sync)
       c.add(s, 'lineWidth', 0.005, 0.15, 0.005).name('line width').onChange(sync)
+      c.add(s, 'capOpacity', 0, 1, 0.05).name('peak cap opacity').onChange(sync)
       c.addColor(s, 'lineColor').name('low color').onChange(sync)
       c.addColor(s, 'peakColor').name('peak color').onChange(sync)
       c.add(s, 'contourOpacity', 0, 1, 0.01).name('opacity').onChange(sync)
@@ -457,6 +461,7 @@ export function TerrainPanel({
         interval: 1 / controls.count,
         heightScale: controls.height,
         lineWidth: controls.lineWidth,
+        capOpacity: controls.capOpacity,
         lineColor: hexToRgb(controls.lineColor),
         peakColor: hexToRgb(controls.peakColor),
         opacity: controls.contourOpacity,

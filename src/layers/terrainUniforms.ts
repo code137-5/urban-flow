@@ -5,6 +5,8 @@ export type TerrainProps = {
   heightScale: number
   interval: number
   lineWidth: number
+  /** Opacity of the saturated summit plateau (p99-clipped to 1.0); 0 = removed. */
+  capOpacity: number
   lineColor: [number, number, number, number]
   peakColor: [number, number, number, number]
 }
@@ -17,6 +19,7 @@ layout(std140) uniform terrainUniforms {
   float heightScale;
   float interval;
   float lineWidth;
+  float capOpacity;
   vec4 lineColor;
   vec4 peakColor;
 } terrain;
@@ -30,6 +33,7 @@ export const terrainUniforms = {
     heightScale: 'f32',
     interval: 'f32',
     lineWidth: 'f32',
+    capOpacity: 'f32',
     lineColor: 'vec4<f32>',
     peakColor: 'vec4<f32>',
   },

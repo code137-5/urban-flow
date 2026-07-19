@@ -22,6 +22,17 @@ void main(void) {
   // below the first interval so only genuine rings around hotspots remain.
   if (vHeight < terrain.interval * 0.5) discard;
 
+  // p99 normalization clips summits to exactly 1.0, so the whole plateau sits
+  // ON the top contour level (h = an integer) and used to render as a solid
+  // filled cap. Render that saturated plateau at its own tunable opacity
+  // instead — 0 removes it entirely, leaving only the topmost ring.
+  if (vHeight >= 0.999) {
+    if (terrain.capOpacity < 0.01) discard;
+    fragColor = vec4(terrain.peakColor.rgb, terrain.capOpacity * layer.opacity);
+    DECKGL_FILTER_COLOR(fragColor, geometry);
+    return;
+  }
+
   // Contour lines WITHOUT screen-space derivatives. `fwidth`/`dFdx` are a
   // common mobile GLSL ES compile-failure class (strict drivers reject them
   // even under #version 300 es), and this is the only layer that used them —
