@@ -36,6 +36,10 @@ export type ParticleLayerProps = {
   glow?: number
   /** Trail (ghost afterimage) strength 0–1; 0 disables the history draws. */
   trail?: number
+  /** Number of ghost snapshots in the trail (1–6). Change = history realloc. */
+  trailLength?: number
+  /** Simulation steps between snapshots — spacing of the ghosts. */
+  trailGap?: number
   /** Sprite color (RGB 0–255). */
   color?: [number, number, number]
   /** Meters above the terrain surface (avoids z-fighting the contour lines). */
@@ -58,6 +62,8 @@ const defaultProps: DefaultProps<ParticleLayerProps> = {
   sizeVariation: { type: 'number', value: 0.5 },
   glow: { type: 'number', value: 0.6 },
   trail: { type: 'number', value: 0.5 },
+  trailLength: { type: 'number', value: 3 },
+  trailGap: { type: 'number', value: 2 },
   color: { type: 'color', value: [120, 169, 255] }, // IBM Blue 40, the design system link color
   zOffset: { type: 'number', value: 15 },
   animate: true,
@@ -166,6 +172,8 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     } else if (props.heightmap !== oldProps.heightmap) {
       // Same particle count: rebuild the field + re-seed state in place.
       this._rebuildField()
+    } else if (props.trailLength !== oldProps.trailLength) {
+      this._rebuildHistory()
     }
 
     if (props.animate && this.state.transform) {
@@ -185,13 +193,14 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     // Trails: draw past snapshots first (oldest → newest), dimmer and smaller,
     // so the live particles render on top of their own afterimages.
     if (trail > 0 && history) {
-      const alphaRamp = [0.15, 0.25, 0.4]
-      const sizeRamp = [0.55, 0.7, 0.85]
-      for (let i = 0; i < history.length; i++) {
-        const slot = history[(historyHead + i) % history.length]
+      const n = history.length
+      for (let i = 0; i < n; i++) {
+        const slot = history[(historyHead + i) % n]
+        // t runs (1/n .. 1]: newest ghost is brightest and largest.
+        const t = (i + 1) / n
         model.setAttributes({ positions: slot })
         model.shaderInputs.setProps({
-          particle: this._uniformValues(0, trail * alphaRamp[i], sizeRamp[i]),
+          particle: this._uniformValues(0, trail * (0.1 + 0.3 * t), 0.5 + 0.35 * t),
         })
         model.draw(this.context.renderPass)
       }
@@ -227,11 +236,10 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     ]
     // Trail snapshots start coincident with the live particles (no artifacts on
     // the first frames); they diverge as the ring rotates.
-    const history = [
+    const trailLength = Math.max(1, Math.round(this.props.trailLength ?? 3))
+    const history = Array.from({ length: trailLength }, () =>
       device.createBuffer({ data: positions.slice() }),
-      device.createBuffer({ data: positions.slice() }),
-      device.createBuffer({ data: positions.slice() }),
-    ]
+    )
     const seedBuffer = device.createBuffer({ data: seeds })
     const flowTexture = this._createFlowTexture(flowField)
 
@@ -305,6 +313,34 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     this.state.current = 0
   }
 
+  /**
+   * Recreate the trail ring at the current `trailLength`, seeding every slot
+   * from the LIVE particle buffer (GPU-side copy) so ghosts never jump.
+   */
+  private _rebuildHistory() {
+    const { buffers, current } = this.state
+    if (!buffers) return
+    const { device } = this.context
+    const trailLength = Math.max(1, Math.round(this.props.trailLength ?? 3))
+    this.state.history?.forEach((b) => b.destroy())
+    const src = buffers[current]
+    const history: Buffer[] = []
+    for (let i = 0; i < trailLength; i++) {
+      const buf = device.createBuffer({ byteLength: src.byteLength })
+      const encoder = device.createCommandEncoder()
+      encoder.copyBufferToBuffer({
+        sourceBuffer: src,
+        destinationBuffer: buf,
+        size: src.byteLength,
+      })
+      encoder.finish()
+      encoder.destroy()
+      history.push(buf)
+    }
+    this.state.history = history
+    this.state.historyHead = 0
+  }
+
   private _createFlowTexture(flowField: FlowField): Texture {
     return this.context.device.createTexture({
       data: flowField.data,
@@ -367,11 +403,12 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     })
     this.state.current = 1 - current
 
-    // Rotate a state snapshot into the trail ring every other step (~15 Hz) so
-    // the ghost afterimages sit a visible distance behind the live particles.
+    // Rotate a state snapshot into the trail ring every `trailGap` steps so the
+    // ghost afterimages sit a visible distance behind the live particles.
     this.state.stepCount += 1
     const { history } = this.state
-    if (history && (this.props.trail ?? 0.5) > 0 && this.state.stepCount % 2 === 0) {
+    const trailGap = Math.max(1, Math.round(this.props.trailGap ?? 2))
+    if (history && (this.props.trail ?? 0.5) > 0 && this.state.stepCount % trailGap === 0) {
       const target = history[this.state.historyHead]
       const encoder = this.context.device.createCommandEncoder()
       encoder.copyBufferToBuffer({
