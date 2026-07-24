@@ -1,11 +1,11 @@
 #version 300 es
 #define SHADER_NAME contour-terrain-fragment
 
-// NOTE: no `precision` statement here on purpose — luma.gl's assembled prologue
+// NOTE: no `precision` statement here on purpose -- luma.gl's assembled prologue
 // already declares `precision highp float;` for the fragment stage. Declaring it
 // again duplicates it, which some strict mobile GLSL ES drivers reject (desktop
 // and ANGLE tolerate it). The base map layers don't redeclare precision, and
-// they compile on the affected device — so this duplicate is a prime suspect.
+// they compile on the affected device -- so this duplicate is a prime suspect.
 
 in float vHeight;
 in float vMask;
@@ -25,7 +25,7 @@ void main(void) {
   // p99 normalization clips summits to exactly 1.0, so the whole plateau sits
   // ON the top contour level (h = an integer) and used to render as a solid
   // filled cap. Render that saturated plateau at its own tunable opacity
-  // instead — 0 removes it entirely, leaving only the topmost ring.
+  // instead -- 0 removes it entirely, leaving only the topmost ring.
   if (vHeight >= 0.999) {
     if (terrain.capOpacity < 0.01) discard;
     fragColor = vec4(terrain.peakColor.rgb, terrain.capOpacity * layer.opacity);
@@ -35,7 +35,7 @@ void main(void) {
 
   // Contour lines WITHOUT screen-space derivatives. `fwidth`/`dFdx` are a
   // common mobile GLSL ES compile-failure class (strict drivers reject them
-  // even under #version 300 es), and this is the only layer that used them —
+  // even under #version 300 es), and this is the only layer that used them --
   // hence the terrain-only shader error on mobile. Instead, measure the
   // distance to the nearest contour directly in height-interval units and
   // soften with smoothstep. `lineWidth` is the line half-width in those units.
@@ -44,7 +44,7 @@ void main(void) {
 
   // Slope-invariant thickness: a fixed height band maps to a screen width that
   // scales with 1/slope (thick on flats, thin on steeps). Dividing the
-  // height-space distance by the local |∇h| (baked per-vertex, ~1.0 at a
+  // height-space distance by the local |grad(h)| (baked per-vertex, ~1.0 at a
   // typical slope) turns `f` into a per-unit-distance metric, so every contour
   // renders at the same apparent thickness. Clamp the factor: the floor keeps
   // gentle slopes from vanishing, the ceiling stops steeps from fattening past

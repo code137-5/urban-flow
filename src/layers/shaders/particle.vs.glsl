@@ -1,7 +1,7 @@
 #version 300 es
 #define SHADER_NAME particle-vertex
 
-// Render pass reads particle state straight from the ping-pong buffer — no
+// Render pass reads particle state straight from the ping-pong buffer -- no
 // texture fetch anywhere in this stage (the transform step bakes the terrain
 // height into positions.z, honoring the same "bake, don't fetch" rule as the
 // terrain mesh).
@@ -29,7 +29,7 @@ void main(void) {
   vAlpha = fadeIn * fadeOut * (1.0 - hidden);
 
   // Slight per-particle size variation from the static seed. Doubled so the
-  // fragment shader has room for a wide glow halo around the core dot —
+  // fragment shader has room for a wide glow halo around the core dot --
   // overlapping halos accumulate under additive blending.
   gl_PointSize =
     particle.sprite.x * (1.0 - 0.5 * particle.sprite.y + particle.sprite.y * seeds.x) * 2.0;

@@ -6,11 +6,11 @@ in vec3 positions;
 in vec3 positions64Low;
 
 // Per-vertex heightmap value: -1 = masked (outside Seoul / river), else [0,1].
-// Baked as an attribute (not a texture) so no vertex texture fetch is needed —
+// Baked as an attribute (not a texture) so no vertex texture fetch is needed --
 // mobile GPUs often can't sample float textures in the vertex stage.
 in float heightVal;
 
-// Per-vertex slope factor: |∇h| normalized to the field mean (~1.0 at a typical
+// Per-vertex slope factor: |grad(h)| normalized to the field mean (~1.0 at a typical
 // slope). Baked on the CPU in buildGridMesh; used by the fragment shader to keep
 // contour lines a uniform screen-space thickness regardless of local slope.
 in float slopeVal;

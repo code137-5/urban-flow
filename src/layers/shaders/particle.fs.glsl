@@ -1,7 +1,7 @@
 #version 300 es
 #define SHADER_NAME particle-fragment
 
-// NOTE: no `precision` statement (luma's prologue already declares it — a
+// NOTE: no `precision` statement (luma's prologue already declares it -- a
 // duplicate breaks strict mobile drivers) and no screen-space derivatives.
 
 in float vAlpha;
@@ -11,7 +11,7 @@ out vec4 fragColor;
 void main(void) {
   // Two-lobe sprite: a bright core in the inner half plus a wide, faint halo
   // filling the (doubled) point. Under additive blending the halos of nearby
-  // particles stack, so overlaps visibly bloom — sprite.z tunes the strength.
+  // particles stack, so overlaps visibly bloom -- sprite.z tunes the strength.
   float d = length(gl_PointCoord - 0.5);
   float core = smoothstep(0.25, 0.06, d);
   float falloff = max(1.0 - d * 2.0, 0.0);
