@@ -11,6 +11,13 @@
  * via a `uf-shader-error` event so the app can show it on-screen — most mobile
  * browsers don't expose a usable console.
  *
+ * (3) Some mobile GLSL ES drivers reject any non-ASCII byte in the shader source
+ * (em-dashes and other Unicode in comments), often failing with an *empty* info
+ * log that gives no clue why. We strip every non-ASCII character to a space in
+ * `sanitizeShaderSource` before the source reaches the driver. GLSL has no string
+ * literals and all valid tokens are ASCII, so non-ASCII can only appear in
+ * comments — replacing it is always safe.
+ *
  * Import this module before any WebGL context is created (first in main.tsx).
  */
 
@@ -19,9 +26,24 @@ export type ShaderError = { stage: string; log: string; source: string }
 /** Latest captured shader compile errors (most recent last). */
 export const shaderErrors: ShaderError[] = []
 
-/** Remove illegal storage qualifiers from interface-block members. */
+/**
+ * Match every non-ASCII character (anything outside tab / LF / CR / printable
+ * ASCII). GLSL has no string literals and all valid tokens are ASCII, so any
+ * non-ASCII byte can only legally appear in a comment — replacing it with a
+ * space is always safe. We replace (not delete) to preserve token separation
+ * and keep line/column offsets stable for driver info logs. Characters outside
+ * the BMP occupy two UTF-16 code units and become two spaces (one per unit).
+ */
+// oxlint-disable-next-line no-control-regex -- intentionally matches control bytes
+const NON_ASCII = /[^\x09\x0A\x0D\x20-\x7E]/g
+
+/**
+ * Strip non-ASCII characters, then remove illegal storage qualifiers from
+ * interface-block members. The non-ASCII pass runs first so the qualifier
+ * regex always operates on clean, ASCII-only input.
+ */
 export function sanitizeShaderSource(src: string): string {
-  return src.replace(
+  return src.replace(NON_ASCII, ' ').replace(
     /\b(uniform|buffer)\s+(\w+)\s*\{([^{}]*)\}/g,
     (_full, blockQualifier: string, blockName: string, body: string) => {
       const cleaned = body.replace(/(^|\n)(\s*)(?:uniform|in|out)\s+/g, '$1$2')
