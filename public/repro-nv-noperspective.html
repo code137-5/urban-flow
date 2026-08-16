@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Repro: NV_shader_noperspective_interpolation poisons fragment compiles (Adreno 710)</title>
+<style>
+  body { background: #161616; color: #f4f4f4; font: 14px/1.5 monospace; margin: 16px; }
+  h1 { font-size: 16px; }
+  .ok { color: #42be65; }
+  .fail { color: #fa4d56; }
+  .warn { color: #f1c21b; }
+  pre { white-space: pre-wrap; word-break: break-all; background: #262626; padding: 8px; }
+  table { border-collapse: collapse; margin: 8px 0; }
+  td, th { border: 1px solid #525252; padding: 4px 8px; text-align: left; }
+</style>
+</head>
+<body>
+<h1>Standalone repro: enabling NV_shader_noperspective_interpolation breaks unrelated fragment shader compiles</h1>
+<p>Each test creates a FRESH WebGL2 context. "with ext" means the only difference is one
+<code>gl.getExtension('NV_shader_noperspective_interpolation')</code> call before compiling.
+The shader never uses the extension.</p>
+<div id="out">running…</div>
+<script>
+'use strict';
+
+// The exact fragment shader (as assembled by deck.gl/luma.gl 9.3, comments stripped)
+// that Adreno 710 rejects with COMPILE_STATUS=false and an EMPTY info log
+// whenever NV_shader_noperspective_interpolation has been enabled on the context.
+const FULL_SHADER = `#version 300 es
+
+
+#define SHADER_TYPE_FRAGMENT
+
+#define DEFAULT_GPU
+
+#define LUMA_FP64_CODE_ELIMINATION_WORKAROUND 1
+
+#define LUMA_FP32_TAN_PRECISION_WORKAROUND 1
+
+#define LUMA_FP64_HIGH_BITS_OVERFLOW_WORKAROUND 1
+
+precision highp float;
+
+
+
+
+
+
+
+
+#define MODULE_GEOMETRY
+#define SMOOTH_EDGE_RADIUS 0.5
+
+struct FragmentGeometry {
+  vec2 uv;
+} geometry;
+
+float smoothedge(float edge, float x) {
+  return smoothstep(edge - SMOOTH_EDGE_RADIUS, edge + SMOOTH_EDGE_RADIUS, x);
+}
+
+
+
+#define MODULE_FP32
+
+
+
+#define MODULE_PROJECT
+
+
+
+#define MODULE_PROJECT32
+
+
+
+#define MODULE_TERRAIN
+layout(std140) uniform terrainUniforms {
+  float heightScale;
+  float interval;
+  float lineWidth;
+  float capOpacity;
+  vec4 lineColor;
+  vec4 peakColor;
+} terrain;
+
+
+
+#define MODULE_LAYER
+layout(std140) uniform layerUniforms {
+  float opacity;
+} layer;
+
+
+
+
+void DECKGL_FILTER_COLOR(inout vec4 color, FragmentGeometry geometry) {
+}
+#define SHADER_NAME contour-terrain-fragment
+
+in float vHeight;
+in float vMask;
+in float vSlope;
+
+out vec4 fragColor;
+
+void main(void) {
+
+  if (vMask < 0.5) discard;
+
+
+
+
+  if (vHeight < terrain.interval * 0.5) discard;
+
+
+
+
+
+  if (vHeight >= 0.999) {
+    if (terrain.capOpacity < 0.01) discard;
+    fragColor = vec4(terrain.peakColor.rgb, terrain.capOpacity * layer.opacity);
+    DECKGL_FILTER_COLOR(fragColor, geometry);
+    return;
+  }
+
+
+
+  float h = vHeight / terrain.interval;
+  float f = abs(fract(h - 0.5) - 0.5);
+
+
+
+  float slope = clamp(vSlope, 0.4, 4.0);
+  float dist = f / slope;
+  float ring = 1.0 - smoothstep(terrain.lineWidth, terrain.lineWidth + 0.03, dist);
+  if (ring < 0.02) discard;
+
+  vec3 color = mix(terrain.lineColor, terrain.peakColor, vHeight).rgb;
+  fragColor = vec4(color, ring * layer.opacity);
+
+  DECKGL_FILTER_COLOR(fragColor, geometry);
+}`;
+
+const MINIMAL_SHADER = `#version 300 es
+precision highp float;
+out vec4 fragColor;
+void main() { fragColor = vec4(1.0); }`;
+
+// Progressive minimization variants (all compiled WITH the extension enabled).
+// Whichever smallest variant still FAILs is the minimal repro shader.
+const HEAD = '#version 300 es\nprecision highp float;\n';
+const UBOS = `layout(std140) uniform terrainUniforms {
+  float heightScale; float interval; float lineWidth; float capOpacity;
+  vec4 lineColor; vec4 peakColor;
+} terrain;
+layout(std140) uniform layerUniforms { float opacity; } layer;
+`;
+const STRUCT = 'struct FragmentGeometry { vec2 uv; } geometry;\n';
+const HOOK = 'void DECKGL_FILTER_COLOR(inout vec4 color, FragmentGeometry g) {}\n';
+const VARYINGS = 'in float vHeight;\nin float vMask;\nin float vSlope;\n';
+const VARIANTS = [
+  ['V1 full shader (control)', FULL_SHADER],
+  ['V2 no filter-hook function', FULL_SHADER.replace(/void DECKGL_FILTER_COLOR[^]*?\n\}\n/, '')
+      .replace(/^\s*DECKGL_FILTER_COLOR\(fragColor, geometry\);\s*$/gm, '')],
+  ['V3 no discards', FULL_SHADER.replace(/discard;/g, 'fragColor = vec4(0.0);')
+      .replace('if (terrain.capOpacity < 0.01) fragColor = vec4(0.0);',
+               'if (terrain.capOpacity < 0.01) { fragColor = vec4(0.0); return; }')],
+  ['V4 no UBOs (constants)', FULL_SHADER
+      .replace(/layout\(std140\) uniform terrainUniforms[^]*?\} terrain;/, '')
+      .replace(/layout\(std140\) uniform layerUniforms[^]*?\} layer;/, '')
+      .replace(/terrain\.(heightScale|interval|lineWidth|capOpacity)/g, '0.5')
+      .replace(/terrain\.(lineColor|peakColor)/g, 'vec4(0.5)')
+      .replace(/layer\.opacity/g, '1.0')],
+  ['V5 UBOs + varyings + discard only', HEAD + UBOS + VARYINGS +
+   'out vec4 fragColor;\nvoid main() {\n  if (vMask < 0.5) discard;\n' +
+   '  fragColor = vec4(mix(terrain.lineColor, terrain.peakColor, vHeight).rgb, layer.opacity);\n}'],
+  ['V6 UBOs + varyings, no discard', HEAD + UBOS + VARYINGS +
+   'out vec4 fragColor;\nvoid main() {\n' +
+   '  fragColor = vec4(mix(terrain.lineColor, terrain.peakColor, vHeight).rgb, layer.opacity);\n}'],
+  ['V7 struct+hook only, no UBOs', HEAD + STRUCT + HOOK +
+   'out vec4 fragColor;\nvoid main() {\n  fragColor = vec4(1.0);\n  DECKGL_FILTER_COLOR(fragColor, geometry);\n}'],
+  ['V8 one UBO read only', HEAD +
+   'layout(std140) uniform layerUniforms { float opacity; } layer;\n' +
+   'out vec4 fragColor;\nvoid main() { fragColor = vec4(layer.opacity); }'],
+  ['V9 minimal (control)', MINIMAL_SHADER],
+];
+
+function compileOnFreshCtx(source, enableExt) {
+  const gl = document.createElement('canvas').getContext('webgl2');
+  if (!gl) return { ok: false, log: '(no webgl2 context)', noCtx: true };
+  try {
+    if (enableExt) gl.getExtension('NV_shader_noperspective_interpolation');
+    const sh = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(sh, source);
+    gl.compileShader(sh);
+    const ok = !!gl.getShaderParameter(sh, gl.COMPILE_STATUS);
+    const log = ok ? '' : (gl.getShaderInfoLog(sh) || '(empty info log)');
+    gl.deleteShader(sh);
+    return { ok, log };
+  } finally {
+    const lose = gl.getExtension('WEBGL_lose_context');
+    if (lose) lose.loseContext();
+  }
+}
+
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+
+function main() {
+  const out = [];
+  const gl = document.createElement('canvas').getContext('webgl2');
+  if (!gl) { document.getElementById('out').textContent = 'WebGL2 unavailable'; return; }
+  const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+  const renderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+  const supported = (gl.getSupportedExtensions() || []).includes('NV_shader_noperspective_interpolation');
+  const lose = gl.getExtension('WEBGL_lose_context'); if (lose) lose.loseContext();
+
+  out.push('<pre>renderer: ' + esc(renderer) + '\nUA: ' + esc(navigator.userAgent) +
+    '\nNV_shader_noperspective_interpolation supported: ' + supported + '</pre>');
+  if (!supported) {
+    out.push('<p class="warn">Extension not supported on this device - the bug cannot trigger here. ' +
+      'Run this page on the affected device (Adreno 710).</p>');
+  }
+
+  const a = compileOnFreshCtx(FULL_SHADER, false);
+  const b = compileOnFreshCtx(FULL_SHADER, true);
+  out.push('<h1>Main repro (full shader)</h1><table><tr><th>case</th><th>result</th><th>info log</th></tr>' +
+    '<tr><td>A: clean context</td><td class="' + (a.ok ? 'ok">ok' : 'fail">FAIL') + '</td><td>' + esc(a.log) + '</td></tr>' +
+    '<tr><td>B: ext enabled first</td><td class="' + (b.ok ? 'ok">ok' : 'fail">FAIL') + '</td><td>' + esc(b.log) + '</td></tr></table>');
+  out.push('<p>' + (a.ok && !b.ok
+    ? '<span class="fail">BUG REPRODUCED</span>: identical source, only difference is getExtension().'
+    : (a.ok && b.ok ? '<span class="ok">Not reproduced on this device.</span>'
+                    : '<span class="warn">Unexpected: case A failed - different problem on this device.</span>')) + '</p>');
+
+  out.push('<h1>Minimization ladder (all with ext enabled)</h1>' +
+    '<table><tr><th>variant</th><th>result</th><th>info log</th></tr>');
+  for (const [name, src] of VARIANTS) {
+    const r = compileOnFreshCtx(src, true);
+    out.push('<tr><td>' + esc(name) + '</td><td class="' + (r.ok ? 'ok">ok' : 'fail">FAIL') +
+      '</td><td>' + esc(r.log) + '</td></tr>');
+  }
+  out.push('</table><p>The smallest FAILing variant is the minimal repro. ' +
+    'Please screenshot this whole page for the bug report.</p>');
+  document.getElementById('out').innerHTML = out.join('\n');
+}
+main();
+</script>
+</body>
+</html>
