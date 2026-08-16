@@ -40,4 +40,14 @@ export async function initDebugConsole(): Promise<void> {
   // Dynamic import keeps the eruda chunk out of the normal-visitor bundle.
   const { default: eruda } = await import('eruda')
   eruda.init()
+
+  // Shader probe lab: bisects which GLSL construct a mobile driver rejects.
+  // Dynamically imported AFTER eruda so its output is visible on-device, and
+  // only inside this debug-gated branch — normal visitors never fetch it.
+  try {
+    const { runShaderProbes } = await import('./debugProbes')
+    await runShaderProbes()
+  } catch (err) {
+    console.warn('shader probes failed to run', err)
+  }
 }

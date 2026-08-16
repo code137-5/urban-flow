@@ -228,6 +228,25 @@ function reportShaderError(err: ShaderError): void {
   } catch {
     /* ignore */
   }
+  // (3) full numbered ANGLE-translated source, same chunked format. This is what
+  // the driver's own compiler actually consumed, so when the info log is empty
+  // it is the only evidence of which construct the driver choked on.
+  try {
+    if (err.translated) {
+      const numbered = err.translated
+        .split('\n')
+        .map((line, i) => `${String(i + 1).padStart(3, ' ')}| ${line}`)
+      const CHUNK = 60
+      for (let i = 0; i < numbered.length; i += CHUNK) {
+        console.error(
+          `[urban-flow] translated lines ${i + 1}-${Math.min(i + CHUNK, numbered.length)}:\n` +
+            numbered.slice(i, i + CHUNK).join('\n'),
+        )
+      }
+    }
+  } catch {
+    /* ignore */
+  }
   try {
     window.dispatchEvent(new CustomEvent('uf-shader-error', { detail: err }))
   } catch {
@@ -241,9 +260,72 @@ type GL = WebGL2RenderingContext & {
   __ufLinkPatched?: boolean
 }
 
+type SourceFn = (shader: WebGLShader, source: string) => void
+type CompileFn = (shader: WebGLShader) => void
+
+/**
+ * The pre-patch `shaderSource` / `compileShader`, keyed by the prototype they
+ * were taken from. `compileQuiet` uses these so probe compiles never run through
+ * the reporting patch (which would push into `shaderErrors` and dump the full
+ * numbered source for every intentionally-failing probe).
+ */
+const originalSource = new WeakMap<object, SourceFn>()
+const originalCompile = new WeakMap<object, CompileFn>()
+
+/** Walk the context's prototype chain for a remembered original. */
+function findOriginal<T>(gl: object, map: WeakMap<object, T>): T | undefined {
+  let proto: object | null = Object.getPrototypeOf(gl) as object | null
+  while (proto) {
+    const fn = map.get(proto)
+    if (fn) return fn
+    proto = Object.getPrototypeOf(proto) as object | null
+  }
+  return undefined
+}
+
+/**
+ * Compile `source` on `gl` and return the status WITHOUT any of the reporting
+ * side effects of the patched `compileShader`: nothing is pushed into
+ * `shaderErrors`, no console dump, no `uf-shader-error` event. The source still
+ * goes through `sanitizeShaderSource` explicitly, so a quiet compile sees
+ * exactly the bytes a real shader would.
+ *
+ * Intended for the on-device probe lab (`debugProbes.ts`), where most probes are
+ * expected to fail and the noise would bury the useful signal.
+ */
+export function compileQuiet(
+  gl: WebGL2RenderingContext,
+  type: number,
+  source: string,
+): { ok: boolean; log: string } {
+  const shader = gl.createShader(type)
+  if (!shader) return { ok: false, log: '(createShader returned null)' }
+  try {
+    const clean = sanitizeShaderSource(source)
+    const setSource = findOriginal(gl, originalSource)
+    const compile = findOriginal(gl, originalCompile)
+    if (setSource) setSource.call(gl, shader, clean)
+    else gl.shaderSource(shader, clean)
+    if (compile) compile.call(gl, shader)
+    else gl.compileShader(shader)
+    const ok = Boolean(gl.getShaderParameter(shader, gl.COMPILE_STATUS))
+    const log = ok ? '' : gl.getShaderInfoLog(shader) || '(driver returned an empty info log)'
+    return { ok, log }
+  } catch (e) {
+    return { ok: false, log: `(threw: ${String(e)})` }
+  } finally {
+    try {
+      gl.deleteShader(shader)
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 function patchShaderSource(proto: GL | undefined): void {
   if (!proto || !proto.shaderSource || proto.__ufSanitized) return
   const original = proto.shaderSource
+  originalSource.set(proto, original as SourceFn)
   proto.shaderSource = function (this: WebGL2RenderingContext, shader, source) {
     const clean = typeof source === 'string' ? sanitizeShaderSource(source) : source
     if (shader && typeof clean === 'string') sources.set(shader, clean)
@@ -255,6 +337,7 @@ function patchShaderSource(proto: GL | undefined): void {
 function patchCompileShader(proto: GL | undefined): void {
   if (!proto || !proto.compileShader || proto.__ufCompilePatched) return
   const original = proto.compileShader
+  originalCompile.set(proto, original as CompileFn)
   proto.compileShader = function (this: WebGL2RenderingContext, shader) {
     const index = ++compileCount
     original.call(this, shader)
