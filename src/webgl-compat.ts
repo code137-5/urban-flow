@@ -61,10 +61,37 @@ export type ShaderError = {
 /** Latest captured shader compile errors (most recent last). */
 export const shaderErrors: ShaderError[] = []
 
+/** One recorded `compileShader` call, kept only in debug mode. */
+export type CompiledEntry = {
+  /** Same global 1-based index the `[uf-trace]` line reports. */
+  index: number
+  stage: 'vertex' | 'fragment'
+  /** Compile status AFTER the empty-log auto-retry. */
+  ok: boolean
+  /** The cleaned source actually handed to the driver. */
+  source: string
+}
+
+/**
+ * Every source compiled in this page, in order — the raw material for the
+ * forensics replay (`runForensics` in `debugProbes.ts`), which recompiles the
+ * prefix before a failure on a FRESH context to test whether the compile
+ * SEQUENCE alone poisons a context.
+ *
+ * Populated ONLY when `traceEnabled` (localStorage `uf-debug`), and capped, so
+ * normal visitors keep an empty array and pay nothing.
+ */
+export const compiledLog: CompiledEntry[] = []
+
+/** Hard cap on `compiledLog`; deck.gl compiles far fewer than this per page. */
+const COMPILED_LOG_LIMIT = 64
+
 declare global {
   interface Window {
     /** Captured shader compile errors, for on-device inspection (e.g. eruda). */
     __ufShaderErrors?: ShaderError[]
+    /** Every compiled shader source, in order (debug mode only). */
+    __ufCompiledLog?: CompiledEntry[]
   }
 }
 
@@ -414,9 +441,16 @@ function patchCompileShader(proto: GL | undefined): void {
       }
 
       const type = this.getShaderParameter(shader, this.SHADER_TYPE)
-      const stage = type === this.VERTEX_SHADER ? 'vertex' : 'fragment'
+      const stage: 'vertex' | 'fragment' = type === this.VERTEX_SHADER ? 'vertex' : 'fragment'
 
-      if (traceEnabled) trace(index, stage, ok, sources.get(shader))
+      if (traceEnabled) {
+        trace(index, stage, ok, sources.get(shader))
+        // Record the source itself (post-retry status) so forensics can replay
+        // the exact compile sequence later. Silently stops at the cap.
+        if (compiledLog.length < COMPILED_LOG_LIMIT) {
+          compiledLog.push({ index, stage, ok, source: sources.get(shader) ?? '' })
+        }
+      }
 
       if (!ok) {
         const log = rawLog || '(driver returned an empty info log)'
@@ -470,6 +504,8 @@ function patchLinkProgram(proto: GL | undefined): void {
 export function installWebglCompat(): void {
   if (typeof window === 'undefined') return
   window.__ufShaderErrors = shaderErrors
+  // Left undefined for normal visitors: its presence IS the "debug mode" tell.
+  if (traceEnabled) window.__ufCompiledLog = compiledLog
   for (const ctor of [window.WebGL2RenderingContext, window.WebGLRenderingContext]) {
     const proto = ctor?.prototype as GL | undefined
     patchShaderSource(proto)

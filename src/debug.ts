@@ -12,8 +12,10 @@ function loadProbes(): Promise<typeof import('./debugProbes')> {
 /** Each error is autopsied exactly once, even if it arrives twice. */
 const seenErrors = new WeakSet<ShaderError>()
 /**
- * Post-mortems compile shaders on the very context that just failed, so they
- * must never overlap: they run one at a time on this tail-chained queue.
+ * Post-mortems compile shaders on the very context that just failed, and
+ * forensics creates (and loses) many scratch contexts, so they must never
+ * overlap: both run one at a time on this tail-chained queue, forensics
+ * immediately after the post-mortem of the same error.
  */
 let postMortemQueue: Promise<void> = Promise.resolve()
 
@@ -22,8 +24,9 @@ function queuePostMortem(err: ShaderError): void {
   seenErrors.add(err)
   postMortemQueue = postMortemQueue.then(async () => {
     try {
-      const { runPostMortem } = await loadProbes()
+      const { runPostMortem, runForensics } = await loadProbes()
       await runPostMortem(err)
+      await runForensics(err)
     } catch (e) {
       console.warn('post-mortem failed to run', e)
     }

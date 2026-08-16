@@ -21,8 +21,8 @@
  * `shaderSource`/`compileShader`: probe failures are EXPECTED, so they must not
  * land in `shaderErrors` nor trigger the full numbered-source console dump.
  */
-import { compileQuiet, shaderErrors } from './webgl-compat'
-import type { ShaderError } from './webgl-compat'
+import { compileQuiet, compiledLog, shaderErrors } from './webgl-compat'
+import type { CompiledEntry, ShaderError } from './webgl-compat'
 import particleFsSource from './layers/shaders/particle.fs.glsl'
 import terrainFsSource from './layers/shaders/terrain.fs.glsl'
 
@@ -39,12 +39,34 @@ export type PostMortemResult = {
   verdict: string
 }
 
+/** One forensics run: the F0-F5 ladder around a single captured failure. */
+export type ForensicsResult = {
+  index: number | null
+  stage: string
+  /** Per-step outcome: 'ok' | 'FAIL' | 'skipped' | 'error'. */
+  f0: string
+  f1: string
+  f2: string
+  f3: string
+  f4: string
+  f5: string
+  /** Context attributes of the failing context (F1), when we had one. */
+  attributes: WebGLContextAttributes | null
+  /** Extension named by the F3 bisection, when it resolved to exactly one. */
+  culpritExt: string | null
+  /** Prior-shader index named by the F5 bisection, when it resolved to one. */
+  culpritIndex: number | null
+  summary: string
+}
+
 declare global {
   interface Window {
     /** Results of the on-device shader probe ladder (debug mode only). */
     __ufProbeResults?: { summary: string; firstFail: string | null; results: ProbeResult[] }
     /** Post-mortem re-tests, one per captured shader failure (debug mode only). */
     __ufPostMortem?: PostMortemResult[]
+    /** Context forensics, one per captured shader failure (debug mode only). */
+    __ufForensics?: ForensicsResult[]
   }
 }
 
@@ -478,6 +500,343 @@ export async function runPostMortem(err: ShaderError): Promise<void> {
   } catch (e) {
     try {
       console.error('[uf-postmortem] crashed', e)
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Context forensics: WHICH property of deck.gl's context breaks these sources.
+// ---------------------------------------------------------------------------
+
+/**
+ * The post-mortem verdict is "source+state interaction": the exact bytes that
+ * fail on deck.gl's context compile fine on a fresh one, and a minimal shader
+ * compiles fine on deck.gl's context. So the difference is a property of THAT
+ * context. Only three candidates can differ on a freshly-made context:
+ *
+ *   F1  the context ATTRIBUTES deck.gl asked for (antialias/alpha/depth/...),
+ *   F2/F3 the EXTENSIONS enabled on it (KHR_parallel_shader_compile first —
+ *        it makes compiles asynchronous, so a status read can race — then every
+ *        supported extension, bisected to name the culprit),
+ *   F4/F5 the SEQUENCE of shaders compiled on it before ours (the trace shows
+ *        both failures land immediately after one of OUR big vertex shaders).
+ *
+ * Every step re-compiles the exact failing source on a FRESH scratch context
+ * that differs from the baseline in exactly one way, so a FAIL names the cause.
+ * Scratch contexts are released with `WEBGL_lose_context` because the bisections
+ * can create dozens and mobile browsers cap live contexts at ~8-16.
+ */
+function logForensics(line: string): void {
+  try {
+    // console.error so eruda renders it red and it survives log-level filters.
+    console.error(`[uf-forensics] ${line}`)
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Once a context creation fails, every later step degrades to 'skipped'. */
+let contextBudgetExhausted = false
+
+function scratchCtx(attrs?: WebGLContextAttributes): WebGL2RenderingContext | null {
+  if (contextBudgetExhausted) return null
+  let gl: WebGL2RenderingContext | null = null
+  try {
+    gl = document.createElement('canvas').getContext('webgl2', attrs)
+  } catch {
+    gl = null
+  }
+  if (!gl) {
+    contextBudgetExhausted = true
+    logForensics('(context budget exhausted)')
+  }
+  return gl
+}
+
+function releaseCtx(gl: WebGL2RenderingContext): void {
+  try {
+    const ext = gl.getExtension('WEBGL_lose_context') as WEBGL_lose_context | null
+    ext?.loseContext()
+  } catch {
+    /* ignore */
+  }
+}
+
+type Trial = { ok: boolean; log: string }
+
+/**
+ * One experiment: fresh context (optionally with `attrs`), `prepare` it, then
+ * compile the failing source on it. `null` means "no context left" — the caller
+ * reports 'skipped' rather than inventing a result.
+ */
+function trial(
+  err: ShaderError,
+  prepare?: (gl: WebGL2RenderingContext) => void,
+  attrs?: WebGLContextAttributes,
+): Trial | null {
+  const gl = scratchCtx(attrs)
+  if (!gl) return null
+  try {
+    prepare?.(gl)
+    return compileQuiet(gl, err.stage === 'vertex' ? gl.VERTEX_SHADER : gl.FRAGMENT_SHADER, err.source)
+  } catch (e) {
+    return { ok: false, log: `(threw: ${String(e)})` }
+  } finally {
+    releaseCtx(gl)
+  }
+}
+
+function outcome(r: Trial | null): string {
+  return r ? (r.ok ? 'ok' : 'FAIL') : 'skipped'
+}
+
+/** Yield to the browser between steps: forensics must not block a phone's UI. */
+function idle(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+/** Enable `subset` on a fresh context, then compile the failing source. */
+function extTrial(err: ShaderError, subset: readonly string[]): Trial | null {
+  return trial(err, (gl) => {
+    for (const name of subset) gl.getExtension(name)
+  })
+}
+
+/**
+ * Halve the extension list, keeping whichever half still reproduces the FAIL,
+ * until one name is left. If neither half fails alone the trigger needs two
+ * extensions from different halves, which this simple bisection cannot name —
+ * we report the surviving list size instead of guessing.
+ */
+function bisectExtensions(err: ShaderError, list: readonly string[]): string | null {
+  let current = list.slice()
+  for (let round = 0; round < 10 && current.length > 1; round++) {
+    const mid = Math.ceil(current.length / 2)
+    const first = current.slice(0, mid)
+    const second = current.slice(mid)
+    const a = extTrial(err, first)
+    if (!a) return null
+    if (!a.ok) {
+      current = first
+      continue
+    }
+    const b = extTrial(err, second)
+    if (!b) return null
+    if (!b.ok) {
+      current = second
+      continue
+    }
+    logForensics(`F3 bisect: neither half of ${current.length} exts fails alone (interaction)`)
+    return null
+  }
+  return current.length === 1 ? current[0] : null
+}
+
+/** Replay `entries` (in order) on a fresh context, then compile the failing source. */
+function replayTrial(err: ShaderError, entries: readonly CompiledEntry[]): Trial | null {
+  return trial(err, (gl) => {
+    for (const e of entries) {
+      compileQuiet(gl, e.stage === 'vertex' ? gl.VERTEX_SHADER : gl.FRAGMENT_SHADER, e.source)
+    }
+  })
+}
+
+function describeEntry(e: CompiledEntry): string {
+  return `#${e.index} ${e.stage} len=${e.source.length}`
+}
+
+/**
+ * F5. `prior` (whole prefix) is known to reproduce the failure. Find the
+ * smallest cause: first try the last three shaders individually — the trace
+ * points at the custom vertex shader immediately before the failure, so a single
+ * hit here is both likely and cheap — then binary-search the prefix length.
+ */
+function bisectPrefix(
+  err: ShaderError,
+  prior: readonly CompiledEntry[],
+): { line: string; culpritIndex: number | null } {
+  for (const e of prior.slice(-3).reverse()) {
+    const r = replayTrial(err, [e])
+    if (!r) return { line: 'F5 culprit = unresolved (context budget exhausted)', culpritIndex: null }
+    if (!r.ok) {
+      return { line: `F5 culprit = ${describeEntry(e)}`, culpritIndex: e.index }
+    }
+  }
+  // No single late shader does it — find the shortest prefix that still fails.
+  let lo = 1
+  let hi = prior.length
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    const r = replayTrial(err, prior.slice(0, mid))
+    if (!r) return { line: 'F5 culprit = unresolved (context budget exhausted)', culpritIndex: null }
+    if (r.ok) lo = mid + 1
+    else hi = mid
+  }
+  const minimal = prior.slice(0, lo)
+  const last = minimal[minimal.length - 1]
+  if (minimal.length === 1 && last) {
+    return { line: `F5 culprit = ${describeEntry(last)}`, culpritIndex: last.index }
+  }
+  return {
+    line:
+      `F5 culprit = prefix of ${minimal.length} shaders` +
+      (last ? ` (last ${describeEntry(last)})` : ''),
+    culpritIndex: null,
+  }
+}
+
+/**
+ * Run the F0-F5 ladder for one captured failure. Every step is individually
+ * guarded: a crash in one experiment must not cost us the others' output.
+ */
+export async function runForensics(err: ShaderError): Promise<void> {
+  const label = `shader#${err.index ?? '?'}`
+  let f0 = 'skipped'
+  let f1 = 'skipped'
+  let f2 = 'skipped'
+  let f3 = 'skipped'
+  let f4 = 'skipped'
+  let f5 = 'skipped'
+  let attributes: WebGLContextAttributes | null = null
+  let culpritExt: string | null = null
+  let culpritIndex: number | null = null
+
+  try {
+    // F0 — baseline: does the failing source compile on a plain fresh context?
+    try {
+      const r = trial(err)
+      f0 = outcome(r)
+      logForensics(`F0 baseline fresh-ctx ${label}: ${r ? fmt(r) : 'skipped (no context)'}`)
+    } catch (e) {
+      f0 = 'error'
+      logForensics(`F0 crashed: ${String(e)}`)
+    }
+    await idle()
+
+    // F1 — same context ATTRIBUTES deck.gl requested.
+    try {
+      attributes = err.gl?.getContextAttributes() ?? null
+      if (!attributes) {
+        logForensics('F1 attrs: skipped (no context captured on the error)')
+      } else {
+        logForensics(`F1 attrs = ${JSON.stringify(attributes)}`)
+        const r = trial(err, undefined, attributes)
+        f1 = outcome(r)
+        logForensics(`F1 attrs-ctx ${label}: ${r ? fmt(r) : 'skipped (no context)'}`)
+      }
+    } catch (e) {
+      f1 = 'error'
+      logForensics(`F1 crashed: ${String(e)}`)
+    }
+    await idle()
+
+    // F2 — KHR_parallel_shader_compile, the one extension that changes what
+    // COMPILE_STATUS even means (it makes compilation asynchronous).
+    try {
+      const r = trial(err, (gl) => {
+        gl.getExtension('KHR_parallel_shader_compile')
+      })
+      f2 = outcome(r)
+      logForensics(`F2 parallel-ext ${label}: ${r ? fmt(r) : 'skipped (no context)'}`)
+    } catch (e) {
+      f2 = 'error'
+      logForensics(`F2 crashed: ${String(e)}`)
+    }
+    await idle()
+
+    // F3 — every supported extension enabled, then bisect if that breaks it.
+    try {
+      let exts: string[] = []
+      const r = trial(err, (gl) => {
+        exts = gl.getSupportedExtensions() ?? []
+        for (const name of exts) gl.getExtension(name)
+      })
+      f3 = outcome(r)
+      logForensics(`F3 all-ext (${exts.length}) ${label}: ${r ? fmt(r) : 'skipped (no context)'}`)
+      if (r && !r.ok && f2 === 'ok' && exts.length > 1) {
+        culpritExt = bisectExtensions(err, exts)
+        logForensics(`F3 culprit ext = ${culpritExt ?? 'unresolved'}`)
+      }
+    } catch (e) {
+      f3 = 'error'
+      logForensics(`F3 crashed: ${String(e)}`)
+    }
+    await idle()
+
+    // F4 — replay the whole compile SEQUENCE that preceded the failure onto a
+    // fresh context. A FAIL here means prior compiles alone poison a context.
+    let prior: CompiledEntry[] = []
+    try {
+      prior =
+        err.index == null
+          ? []
+          : compiledLog.filter((e) => e.index < (err.index ?? 0) && e.source.length > 0)
+      if (prior.length === 0) {
+        logForensics('F4 replay: skipped (no recorded prior shaders)')
+      } else {
+        const r = replayTrial(err, prior)
+        f4 = outcome(r)
+        logForensics(
+          `F4 replay ${prior.length} prior shaders then ${label}: ${r ? fmt(r) : 'skipped (no context)'}`,
+        )
+      }
+    } catch (e) {
+      f4 = 'error'
+      logForensics(`F4 crashed: ${String(e)}`)
+    }
+    await idle()
+
+    // F5 — the sequence reproduces it: shrink it to the single guilty shader.
+    try {
+      if (f4 === 'FAIL' && prior.length > 0) {
+        // Only meaningful when F0 proved the source compiles on a plain context:
+        // a source that fails everywhere makes every trial "fail" and the
+        // bisection would crown the first shader it tried.
+        const meaningful = f0 === 'ok'
+        if (!meaningful) {
+          logForensics('F5 note: F0 FAILed too - this source is broken on any context, so the bisection below is meaningless')
+        }
+        const res = bisectPrefix(err, prior)
+        culpritIndex = meaningful ? res.culpritIndex : null
+        f5 =
+          res.culpritIndex == null
+            ? 'unresolved'
+            : `#${res.culpritIndex}${meaningful ? '' : ' (meaningless: F0 FAIL)'}`
+        logForensics(res.line + (meaningful ? '' : ' (meaningless: F0 FAIL)'))
+      } else {
+        logForensics(`F5 auto-bisect: skipped (F4 ${f4})`)
+      }
+    } catch (e) {
+      f5 = 'error'
+      logForensics(`F5 crashed: ${String(e)}`)
+    }
+
+    const summary = `summary: F0 ${f0}, F1 ${f1}, F2 ${f2}, F3 ${f3}, F4 ${f4}, F5 ${f5}`
+    logForensics(summary)
+    try {
+      const store = (window.__ufForensics ??= [])
+      store.push({
+        index: err.index ?? null,
+        stage: err.stage,
+        f0,
+        f1,
+        f2,
+        f3,
+        f4,
+        f5,
+        attributes,
+        culpritExt,
+        culpritIndex,
+        summary,
+      })
+    } catch {
+      /* ignore */
+    }
+  } catch (e) {
+    try {
+      console.error('[uf-forensics] crashed', e)
     } catch {
       /* ignore */
     }
