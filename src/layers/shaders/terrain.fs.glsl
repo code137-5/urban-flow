@@ -50,12 +50,12 @@ void main(void) {
   // gentle slopes from vanishing, the ceiling stops steeps from fattening past
   // the mid-interval and merging (and both guard the divide). Derivative-free.
   float slope = clamp(vSlope, 0.4, 4.0);
-  float d = f / slope;
-  float line = 1.0 - smoothstep(terrain.lineWidth, terrain.lineWidth + 0.03, d);
-  if (line < 0.02) discard; // keep only the lines; surface between is transparent
+  float dist = f / slope;
+  float ring = 1.0 - smoothstep(terrain.lineWidth, terrain.lineWidth + 0.03, dist);
+  if (ring < 0.02) discard; // keep only the lines; surface between is transparent
 
   vec3 color = mix(terrain.lineColor, terrain.peakColor, vHeight).rgb;
-  fragColor = vec4(color, line * layer.opacity);
+  fragColor = vec4(color, ring * layer.opacity);
 
   DECKGL_FILTER_COLOR(fragColor, geometry);
 }
