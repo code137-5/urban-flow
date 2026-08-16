@@ -344,11 +344,15 @@ type GL = WebGL2RenderingContext & {
 }
 
 /**
- * Extensions hidden from the app (see module doc, point 5). Enabling
- * NV_shader_noperspective_interpolation makes Adreno 710 reject valid fragment
- * shaders with an empty info log; nothing here uses it.
+ * Extensions hidden from the app (see module doc, point 5). On-device
+ * forensics bisected the enabled-extension list twice: enabling EITHER of
+ * these interpolation-qualifier extensions makes Adreno 710 reject valid
+ * fragment shaders with an empty info log. Nothing here uses them.
  */
-const BLOCKED_EXTENSIONS = new Set(['nv_shader_noperspective_interpolation'])
+const BLOCKED_EXTENSIONS = new Set([
+  'nv_shader_noperspective_interpolation',
+  'oes_shader_multisample_interpolation',
+])
 
 function patchExtensions(proto: GL | undefined): void {
   if (!proto || !proto.getExtension || proto.__ufExtPatched) return
