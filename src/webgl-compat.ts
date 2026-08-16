@@ -30,6 +30,14 @@
  * newlines (and, for block comments, replace each removed character with a
  * space) so line numbers in driver info logs stay aligned with the source.
  *
+ * (5) Qualcomm Adreno 710 (and possibly other Adreno 7xx) rejects our fragment
+ * shaders with an empty info log whenever `NV_shader_noperspective_interpolation`
+ * has been enabled on the context — proven by on-device forensics that bisected
+ * the enabled-extension list (F3 culprit). luma.gl enables every supported
+ * extension at startup, poisoning its own context. Nothing in this app uses
+ * noperspective interpolation, so we hide the extension entirely: `getExtension`
+ * returns null for it and `getSupportedExtensions` omits it.
+ *
  * Import this module before any WebGL context is created (first in main.tsx).
  */
 
@@ -332,6 +340,32 @@ type GL = WebGL2RenderingContext & {
   __ufSanitized?: boolean
   __ufCompilePatched?: boolean
   __ufLinkPatched?: boolean
+  __ufExtPatched?: boolean
+}
+
+/**
+ * Extensions hidden from the app (see module doc, point 5). Enabling
+ * NV_shader_noperspective_interpolation makes Adreno 710 reject valid fragment
+ * shaders with an empty info log; nothing here uses it.
+ */
+const BLOCKED_EXTENSIONS = new Set(['nv_shader_noperspective_interpolation'])
+
+function patchExtensions(proto: GL | undefined): void {
+  if (!proto || !proto.getExtension || proto.__ufExtPatched) return
+  // getExtension's per-name overloads reject a plain string; go through a cast.
+  const originalGet = proto.getExtension as (this: WebGL2RenderingContext, name: string) => unknown
+  proto.getExtension = function (this: WebGL2RenderingContext, name: string) {
+    if (typeof name === 'string' && BLOCKED_EXTENSIONS.has(name.toLowerCase())) return null
+    return originalGet.call(this, name)
+  } as typeof proto.getExtension
+  const originalList = proto.getSupportedExtensions
+  if (originalList) {
+    proto.getSupportedExtensions = function (this: WebGL2RenderingContext) {
+      const list = originalList.call(this)
+      return list ? list.filter((name) => !BLOCKED_EXTENSIONS.has(name.toLowerCase())) : list
+    }
+  }
+  proto.__ufExtPatched = true
 }
 
 type SourceFn = (shader: WebGLShader, source: string) => void
@@ -508,6 +542,7 @@ export function installWebglCompat(): void {
   if (traceEnabled) window.__ufCompiledLog = compiledLog
   for (const ctor of [window.WebGL2RenderingContext, window.WebGLRenderingContext]) {
     const proto = ctor?.prototype as GL | undefined
+    patchExtensions(proto)
     patchShaderSource(proto)
     patchCompileShader(proto)
     patchLinkProgram(proto)
