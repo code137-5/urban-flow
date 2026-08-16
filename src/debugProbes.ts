@@ -22,15 +22,29 @@
  * land in `shaderErrors` nor trigger the full numbered-source console dump.
  */
 import { compileQuiet, shaderErrors } from './webgl-compat'
+import type { ShaderError } from './webgl-compat'
 import particleFsSource from './layers/shaders/particle.fs.glsl'
 import terrainFsSource from './layers/shaders/terrain.fs.glsl'
 
 export type ProbeResult = { id: string; name: string; ok: boolean; log: string }
 
+/** One post-mortem run: the three re-tests around a single captured failure. */
+export type PostMortemResult = {
+  /** `index` of the failed compile this post-mortem investigates. */
+  index: number | null
+  stage: string
+  freshCtx: { ok: boolean; log: string }
+  sameCtx: { ok: boolean; log: string } | null
+  sameCtxMinimal: { ok: boolean; log: string } | null
+  verdict: string
+}
+
 declare global {
   interface Window {
     /** Results of the on-device shader probe ladder (debug mode only). */
     __ufProbeResults?: { summary: string; firstFail: string | null; results: ProbeResult[] }
+    /** Post-mortem re-tests, one per captured shader failure (debug mode only). */
+    __ufPostMortem?: PostMortemResult[]
   }
 }
 
@@ -123,6 +137,9 @@ function stripVersion(src: string): string {
 
 type Probe = { id: string; name: string; source: string }
 
+/** P00: the smallest legal ES 3.00 fragment shader. If this fails, the compiler is dead. */
+const MINIMAL_SOURCE = `${VERSION}\n${PRECISION}\nout vec4 fragColor;\nvoid main(){fragColor=vec4(1.0);}\n`
+
 const MINIMAL_BODY = `out vec4 fragColor;
 
 void main(void) {
@@ -186,11 +203,7 @@ void main(void) {
 
 function buildProbes(): Probe[] {
   return [
-    {
-      id: 'P00',
-      name: 'minimal',
-      source: `${VERSION}\n${PRECISION}\nout vec4 fragColor;\nvoid main(){fragColor=vec4(1.0);}\n`,
-    },
+    { id: 'P00', name: 'minimal', source: MINIMAL_SOURCE },
     {
       id: 'P01',
       name: 'defines',
@@ -359,6 +372,112 @@ export async function runShaderProbes(): Promise<void> {
   } catch (e) {
     try {
       console.error('[uf-probe] probe lab crashed', e)
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Post-mortem: re-test a REAL failure after it happened.
+// ---------------------------------------------------------------------------
+
+/**
+ * The probe ladder runs before React renders and passes everything, including
+ * the real fragment bodies — so the phone's failure is state/order-dependent,
+ * not construct-dependent. This is the other half of the experiment: once a
+ * compile has actually failed, recompile the exact same bytes
+ *
+ *   T1 on a FRESH scratch context,
+ *   T2 on the SAME context that just failed,
+ *   T3 the minimal P00 shader on that same context,
+ *
+ * which separates "this source is bad" from "that context's compiler is gone".
+ */
+function logPost(line: string): void {
+  try {
+    // console.error so eruda renders it red and it survives log-level filters.
+    console.error(`[uf-postmortem] ${line}`)
+  } catch {
+    /* ignore */
+  }
+}
+
+function fmt(res: { ok: boolean; log: string }): string {
+  return res.ok ? 'ok' : `FAIL log="${res.log.replace(/\s+/g, ' ').trim()}"`
+}
+
+function verdictFor(
+  fresh: { ok: boolean },
+  same: { ok: boolean } | null,
+  minimal: { ok: boolean } | null,
+): string {
+  if (!fresh.ok) return 'source-dependent after all'
+  if (!same) return 'no context captured - fresh ctx compiles the same source'
+  if (same.ok) return 'transient - compiler recovered; retry could work'
+  if (minimal && !minimal.ok) return 'context compiler dead (even minimal fails)'
+  if (minimal && minimal.ok) return 'source+state interaction on that context'
+  return 'context poisoned (fresh ctx compiles same source)'
+}
+
+export async function runPostMortem(err: ShaderError): Promise<void> {
+  try {
+    const label = `shader#${err.index ?? '?'}`
+    const type = err.stage === 'vertex' ? 'vertex' : 'fragment'
+
+    // T1 — fresh scratch context.
+    let fresh: { ok: boolean; log: string }
+    try {
+      const canvas = document.createElement('canvas')
+      const gl = canvas.getContext('webgl2')
+      fresh = gl
+        ? compileQuiet(gl, type === 'vertex' ? gl.VERTEX_SHADER : gl.FRAGMENT_SHADER, err.source)
+        : { ok: false, log: '(no fresh webgl2 context)' }
+    } catch (e) {
+      fresh = { ok: false, log: `(threw: ${String(e)})` }
+    }
+    logPost(`T1 fresh-ctx ${label}: ${fmt(fresh)}`)
+
+    // T2/T3 — the exact context that failed, if we captured it.
+    let same: { ok: boolean; log: string } | null = null
+    let minimal: { ok: boolean; log: string } | null = null
+    const gl = err.gl
+    if (gl) {
+      try {
+        same = compileQuiet(gl, type === 'vertex' ? gl.VERTEX_SHADER : gl.FRAGMENT_SHADER, err.source)
+      } catch (e) {
+        same = { ok: false, log: `(threw: ${String(e)})` }
+      }
+      logPost(`T2 same-ctx ${label}: ${fmt(same)}`)
+      try {
+        minimal = compileQuiet(gl, gl.FRAGMENT_SHADER, MINIMAL_SOURCE)
+      } catch (e) {
+        minimal = { ok: false, log: `(threw: ${String(e)})` }
+      }
+      logPost(`T3 same-ctx minimal: ${fmt(minimal)}`)
+    } else {
+      logPost(`T2/T3 same-ctx ${label}: skipped (no context captured on the error)`)
+    }
+
+    const verdict = verdictFor(fresh, same, minimal)
+    logPost(`verdict: ${verdict}`)
+
+    try {
+      const store = (window.__ufPostMortem ??= [])
+      store.push({
+        index: err.index ?? null,
+        stage: err.stage,
+        freshCtx: fresh,
+        sameCtx: same,
+        sameCtxMinimal: minimal,
+        verdict,
+      })
+    } catch {
+      /* ignore */
+    }
+  } catch (e) {
+    try {
+      console.error('[uf-postmortem] crashed', e)
     } catch {
       /* ignore */
     }

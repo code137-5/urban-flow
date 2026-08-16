@@ -50,6 +50,12 @@ export type ShaderError = {
   translated?: string
   /** Global 1-based index of this `compileShader` call — tells you WHICH shader failed. */
   index?: number
+  /**
+   * The exact context the failing compile ran on, so post-mortem probes can
+   * re-test the same source on the SAME (possibly poisoned) context as well as
+   * on a fresh one. Debug tooling only — never read by app code.
+   */
+  gl?: WebGL2RenderingContext
 }
 
 /** Latest captured shader compile errors (most recent last). */
@@ -149,6 +155,47 @@ const contextDiag = new WeakMap<WebGL2RenderingContext, ContextDiag>()
 
 /** Global running count of `compileShader` calls, so we can name the failing shader. */
 let compileCount = 0
+
+/**
+ * Debug-mode compile tracing. Read once at module load (before any context
+ * exists) from the same `uf-debug` flag `debug.ts` gates on, so normal visitors
+ * pay nothing and see nothing. The trace exists because the phone's failures are
+ * STATE/ORDER-dependent: knowing how many shaders compiled, in what order, and
+ * which named one broke is the whole signal.
+ */
+const traceEnabled = (() => {
+  try {
+    return localStorage.getItem('uf-debug') === '1'
+  } catch {
+    return false
+  }
+})()
+
+/** `#define SHADER_NAME foo-layer-fragment-shader` — luma names every shader it assembles. */
+function shaderName(source: string | undefined): string {
+  const m = source ? /#define SHADER_NAME (\S+)/.exec(source) : null
+  return m ? m[1] : '?'
+}
+
+/** ONE terse line per compileShader call, console.error so eruda shows it. */
+function trace(index: number, stage: string, ok: boolean, source: string | undefined): void {
+  try {
+    console.error(
+      `[uf-trace] #${index} ${stage} ${ok ? 'ok' : 'FAIL'} ${shaderName(source)} ` +
+        `len=${source ? source.length : 0}`,
+    )
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Shaders that already used up their one auto-retry. A driver whose compiler
+ * service crashed reports failure with an EMPTY info log; the service respawns,
+ * so a second `compileShader` on the same shader object can succeed. Retrying
+ * more than once would just spin.
+ */
+const retried = new WeakSet<WebGLShader>()
 
 /**
  * Read the GPU renderer/vendor/version strings from a context (cached per
@@ -342,10 +389,37 @@ function patchCompileShader(proto: GL | undefined): void {
     const index = ++compileCount
     original.call(this, shader)
     try {
-      if (shader && !this.getShaderParameter(shader, this.COMPILE_STATUS)) {
-        const type = this.getShaderParameter(shader, this.SHADER_TYPE)
-        const stage = type === this.VERTEX_SHADER ? 'vertex' : 'fragment'
-        const log = this.getShaderInfoLog(shader) || '(driver returned an empty info log)'
+      if (!shader) return
+      let ok = Boolean(this.getShaderParameter(shader, this.COMPILE_STATUS))
+      let rawLog = ok ? '' : this.getShaderInfoLog(shader) || ''
+
+      // Auto-retry experiment: an empty info log is the signature of a crashed
+      // Qualcomm shader-compiler service rather than a real GLSL error. The
+      // service respawns, so compiling the SAME shader object a second time can
+      // succeed — recompiling an attached shader is legal GL, and luma reads
+      // COMPILE_STATUS after us, so it sees the updated state. Once per shader.
+      if (!ok && rawLog.trim() === '' && !retried.has(shader)) {
+        retried.add(shader)
+        original.call(this, shader)
+        ok = Boolean(this.getShaderParameter(shader, this.COMPILE_STATUS))
+        if (ok) {
+          try {
+            console.warn(`[urban-flow] shader #${index} compiled on retry`)
+          } catch {
+            /* ignore */
+          }
+        } else {
+          rawLog = this.getShaderInfoLog(shader) || ''
+        }
+      }
+
+      const type = this.getShaderParameter(shader, this.SHADER_TYPE)
+      const stage = type === this.VERTEX_SHADER ? 'vertex' : 'fragment'
+
+      if (traceEnabled) trace(index, stage, ok, sources.get(shader))
+
+      if (!ok) {
+        const log = rawLog || '(driver returned an empty info log)'
         const diag = getContextDiag(this)
         let translated: string | undefined
         try {
@@ -360,6 +434,7 @@ function patchCompileShader(proto: GL | undefined): void {
           source: sources.get(shader) ?? '',
           index,
           translated,
+          gl: this,
           renderer: diag.renderer,
           vendor: diag.vendor,
           version: diag.version,
