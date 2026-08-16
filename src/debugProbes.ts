@@ -21,7 +21,7 @@
  * `shaderSource`/`compileShader`: probe failures are EXPECTED, so they must not
  * land in `shaderErrors` nor trigger the full numbered-source console dump.
  */
-import { compileQuiet, compiledLog, shaderErrors } from './webgl-compat'
+import { compileQuiet, compiledLog, sanitizeShaderSource, shaderErrors } from './webgl-compat'
 import type { CompiledEntry, ShaderError } from './webgl-compat'
 import particleFsSource from './layers/shaders/particle.fs.glsl'
 import terrainFsSource from './layers/shaders/terrain.fs.glsl'
@@ -39,6 +39,28 @@ export type PostMortemResult = {
   verdict: string
 }
 
+/**
+ * Line-level difference between the ANGLE translation of the SAME source on a
+ * clean context and on one with a culprit extension enabled — the evidence an
+ * upstream ANGLE/driver bug report needs.
+ */
+export type TranslatedDiff = {
+  /** The culprit extension enabled for side (b). */
+  ext: string
+  /** False when `WEBGL_debug_shaders` gave us nothing to compare. */
+  available: boolean
+  /** True when both translations are byte-identical. */
+  identical: boolean
+  /** Lines present only in the CLEAN translation (capped). */
+  removed: string[]
+  /** Lines present only in the +ext translation (capped). */
+  added: string[]
+  /** Compile outcome of each side, for context. */
+  cleanCompile: string
+  extCompile: string
+  note: string
+}
+
 /** One forensics run: the F0-F5 ladder around a single captured failure. */
 export type ForensicsResult = {
   index: number | null
@@ -52,8 +74,14 @@ export type ForensicsResult = {
   f5: string
   /** Context attributes of the failing context (F1), when we had one. */
   attributes: WebGLContextAttributes | null
-  /** Extension named by the F3 bisection, when it resolved to exactly one. */
+  /** First extension named by the F3 search (kept for older readers). */
   culpritExt: string | null
+  /** EVERY extension the F3 search named, in the order they were found. */
+  culpritExts: string[]
+  /** True when the compile passed with `culpritExts` excluded (list is complete). */
+  culpritsComplete: boolean
+  /** Translated-source evidence for the first culprit, when we got that far. */
+  translatedDiff: TranslatedDiff | null
   /** Prior-shader index named by the F5 bisection, when it resolved to one. */
   culpritIndex: number | null
   summary: string
@@ -519,7 +547,8 @@ export async function runPostMortem(err: ShaderError): Promise<void> {
  *   F1  the context ATTRIBUTES deck.gl asked for (antialias/alpha/depth/...),
  *   F2/F3 the EXTENSIONS enabled on it (KHR_parallel_shader_compile first —
  *        it makes compiles asynchronous, so a status read can race — then every
- *        supported extension, bisected to name the culprit),
+ *        supported extension, bisected repeatedly to name EVERY culprit, plus a
+ *        translated-source diff for the first one),
  *   F4/F5 the SEQUENCE of shaders compiled on it before ours (the trace shows
  *        both failures land immediately after one of OUR big vertex shaders).
  *
@@ -597,6 +626,28 @@ function idle(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0))
 }
 
+// ---------------------------------------------------------------------------
+// F3: find EVERY culprit extension, not just the first one.
+// ---------------------------------------------------------------------------
+
+/**
+ * The device has more than one culprit: round 1 named
+ * `NV_shader_noperspective_interpolation`, and once that was blocked app-wide
+ * round 2 named `OES_shader_multisample_interpolation` behind it. A bisection
+ * that stops at the first name costs a full user roundtrip per culprit, so the
+ * search now loops: name a culprit, add it to `excluded`, re-test "all supported
+ * extensions minus excluded" on a fresh context, and bisect again while that
+ * still FAILs. Bounded three ways — culprits, total trials, and the shared
+ * scratch-context budget — because every trial burns a WebGL context on a phone
+ * that caps them at ~8-16 live.
+ */
+const MAX_CULPRITS = 6
+const MAX_EXT_TRIALS = 40
+const MAX_SINGLE_EXT_PROBES = 15
+
+/** Shared state for one F3 search: trials spent, and why we stopped early. */
+type ExtBudget = { trials: number; stop: string | null }
+
 /** Enable `subset` on a fresh context, then compile the failing source. */
 function extTrial(err: ShaderError, subset: readonly string[]): Trial | null {
   return trial(err, (gl) => {
@@ -605,33 +656,341 @@ function extTrial(err: ShaderError, subset: readonly string[]): Trial | null {
 }
 
 /**
- * Halve the extension list, keeping whichever half still reproduces the FAIL,
- * until one name is left. If neither half fails alone the trigger needs two
- * extensions from different halves, which this simple bisection cannot name —
- * we report the surviving list size instead of guessing.
+ * One budgeted extension trial, yielding to the browser afterwards. Returns
+ * `null` the moment a bound is hit (trials or contexts) with `budget.stop`
+ * naming which — every caller treats `null` as "stop", never as a result.
  */
-function bisectExtensions(err: ShaderError, list: readonly string[]): string | null {
-  let current = list.slice()
-  for (let round = 0; round < 10 && current.length > 1; round++) {
+async function extProbe(
+  err: ShaderError,
+  subset: readonly string[],
+  budget: ExtBudget,
+): Promise<Trial | null> {
+  if (budget.stop) return null
+  if (budget.trials >= MAX_EXT_TRIALS) {
+    budget.stop = `trial bound (${MAX_EXT_TRIALS})`
+    return null
+  }
+  budget.trials++
+  const r = extTrial(err, subset)
+  if (!r) budget.stop = 'context budget exhausted'
+  await idle()
+  return r
+}
+
+/**
+ * Neither half of the suspect set reproduced the FAIL on its own. Before
+ * declaring an interaction, try the extensions one at a time — a bounded pass
+ * that names a lone culprit the halving somehow stepped over.
+ */
+async function probeSingles(
+  err: ShaderError,
+  suspects: readonly string[],
+  budget: ExtBudget,
+): Promise<string | null> {
+  const limit = Math.min(suspects.length, MAX_SINGLE_EXT_PROBES)
+  logForensics(`F3 singles: trying ${limit} of ${suspects.length} exts one at a time`)
+  for (let i = 0; i < limit; i++) {
+    const name = suspects[i]
+    const r = await extProbe(err, [name], budget)
+    if (!r) return null
+    if (!r.ok) return name
+  }
+  return null
+}
+
+/**
+ * Halve the suspect list, keeping whichever half still reproduces the FAIL,
+ * until one name is left. If neither half fails alone, fall back to single
+ * extensions; if that finds nothing either, the trigger needs two extensions
+ * from different halves, which this bisection cannot name.
+ */
+async function bisectExtensions(
+  err: ShaderError,
+  suspects: readonly string[],
+  budget: ExtBudget,
+): Promise<string | null> {
+  let current = suspects.slice()
+  for (let round = 0; round < 12 && current.length > 1; round++) {
     const mid = Math.ceil(current.length / 2)
     const first = current.slice(0, mid)
     const second = current.slice(mid)
-    const a = extTrial(err, first)
+    const a = await extProbe(err, first, budget)
     if (!a) return null
     if (!a.ok) {
       current = first
       continue
     }
-    const b = extTrial(err, second)
+    const b = await extProbe(err, second, budget)
     if (!b) return null
     if (!b.ok) {
       current = second
       continue
     }
     logForensics(`F3 bisect: neither half of ${current.length} exts fails alone (interaction)`)
-    return null
+    const single = await probeSingles(err, current, budget)
+    if (!single) {
+      if (!budget.stop) budget.stop = `interaction between >=2 of ${current.length} exts`
+      return null
+    }
+    return single
   }
   return current.length === 1 ? current[0] : null
+}
+
+/** Outcome of the whole F3 search. */
+type CulpritSearch = {
+  culprits: string[]
+  /** True when the compile PASSED with `culprits` excluded — the list is complete. */
+  complete: boolean
+  /** Why we stopped, when the list is not complete. */
+  stop: string
+}
+
+/**
+ * Loop the bisection until the failing source compiles with every named culprit
+ * excluded. The caller has already proven that the full extension list FAILs,
+ * so the first bisection runs without re-testing that.
+ */
+async function findCulpritExtensions(
+  err: ShaderError,
+  all: readonly string[],
+): Promise<CulpritSearch> {
+  const budget: ExtBudget = { trials: 0, stop: null }
+  const culprits: string[] = []
+
+  for (;;) {
+    const suspects = all.filter((name) => !culprits.includes(name))
+    const culprit = await bisectExtensions(err, suspects, budget)
+    if (!culprit) {
+      return {
+        culprits,
+        complete: false,
+        stop: budget.stop ?? 'bisection did not resolve a single extension',
+      }
+    }
+    culprits.push(culprit)
+    logForensics(`F3 culprit ext = ${culprit}`)
+
+    if (culprits.length >= MAX_CULPRITS) {
+      return { culprits, complete: false, stop: `culprit bound (${MAX_CULPRITS})` }
+    }
+    const rest = all.filter((name) => !culprits.includes(name))
+    if (rest.length === 0) return { culprits, complete: true, stop: '' }
+
+    // Re-test "everything minus the culprits so far": passing ends the search.
+    const r = await extProbe(err, rest, budget)
+    if (!r) {
+      return { culprits, complete: false, stop: budget.stop ?? 'context budget exhausted' }
+    }
+    logForensics(
+      `F3 retest ${rest.length} exts minus ${culprits.length} culprit(s): ${r.ok ? 'ok' : 'FAIL'}`,
+    )
+    if (r.ok) return { culprits, complete: true, stop: '' }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Translated-source evidence: what a culprit extension changes in ANGLE's output.
+// ---------------------------------------------------------------------------
+
+/**
+ * A hidden same-origin `about:blank` iframe. Its realm has its OWN
+ * `WebGL2RenderingContext.prototype`, which `installWebglCompat` never touched
+ * (it patches `window.WebGL2RenderingContext` of the main realm only), so
+ * `gl.shaderSource` / `gl.compileShader` there are the pristine natives.
+ *
+ * We need that because `compileQuiet` deletes its shader while
+ * `getTranslatedShaderSource` needs a live one, and the pre-patch originals
+ * `compileQuiet` uses are module-private to `webgl-compat.ts` (a teammate owns
+ * that file). Compiling through the PATCHED `compileShader` instead is not an
+ * option: our +culprit compile is meant to fail, and a failure there would push
+ * into `shaderErrors`, dump the full numbered source, and dispatch
+ * `uf-shader-error` — which queues a whole second post-mortem + forensics run.
+ * A separate realm gives us an unpatched compile with no such side effects.
+ */
+let pristineRealm: Window | null | undefined
+
+function getPristineRealm(): Window | null {
+  if (pristineRealm !== undefined) return pristineRealm
+  pristineRealm = null
+  try {
+    const frame = document.createElement('iframe')
+    frame.setAttribute('aria-hidden', 'true')
+    frame.setAttribute('title', 'urban-flow forensics scratch realm')
+    frame.style.cssText = 'position:absolute;left:-9999px;top:0;width:1px;height:1px;border:0'
+    const host = document.body ?? document.documentElement
+    host.appendChild(frame)
+    if (frame.contentWindow?.document) pristineRealm = frame.contentWindow
+  } catch {
+    pristineRealm = null
+  }
+  return pristineRealm
+}
+
+/**
+ * A scratch context we may compile on DIRECTLY. Prefers the pristine realm; a
+ * main-realm context is only acceptable while it is unpatched (the patch marks
+ * the prototype with `__ufCompilePatched`). No usable context means the diff is
+ * skipped and says why — never silently compiled through the noisy path.
+ */
+function translationCtx(): { gl: WebGL2RenderingContext | null; reason: string } {
+  const realm = getPristineRealm()
+  if (realm) {
+    try {
+      const gl = realm.document.createElement('canvas').getContext('webgl2')
+      if (gl) return { gl, reason: '' }
+    } catch {
+      /* fall through to the main realm */
+    }
+  }
+  const gl = scratchCtx()
+  if (!gl) return { gl: null, reason: 'no scratch context available' }
+  if ('__ufCompilePatched' in gl) {
+    releaseCtx(gl)
+    return { gl: null, reason: 'no unpatched compile path (iframe realm unavailable)' }
+  }
+  return { gl, reason: '' }
+}
+
+type TranslatedCompile = { ok: boolean; log: string; translated?: string }
+
+/**
+ * `compileQuiet` with the shader kept alive long enough to read
+ * `WEBGL_debug_shaders.getTranslatedShaderSource`. Only ever called with a
+ * context from `translationCtx`, whose `shaderSource`/`compileShader` are the
+ * unpatched natives — so this stays as quiet as `compileQuiet` itself.
+ */
+function compileKeepTranslated(
+  gl: WebGL2RenderingContext,
+  type: number,
+  source: string,
+): TranslatedCompile {
+  const shader = gl.createShader(type)
+  if (!shader) return { ok: false, log: '(createShader returned null)' }
+  try {
+    gl.shaderSource(shader, sanitizeShaderSource(source))
+    gl.compileShader(shader)
+    const ok = Boolean(gl.getShaderParameter(shader, gl.COMPILE_STATUS))
+    const log = ok ? '' : gl.getShaderInfoLog(shader) || '(driver returned an empty info log)'
+    let translated: string | undefined
+    try {
+      const ext = gl.getExtension('WEBGL_debug_shaders')
+      if (ext) translated = ext.getTranslatedShaderSource(shader) || undefined
+    } catch {
+      /* ignore */
+    }
+    return { ok, log, translated }
+  } catch (e) {
+    return { ok: false, log: `(threw: ${String(e)})` }
+  } finally {
+    try {
+      gl.deleteShader(shader)
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/** Enable `exts`, compile the failing source, keep the ANGLE translation. */
+function captureTranslated(
+  err: ShaderError,
+  exts: readonly string[],
+): { res: TranslatedCompile | null; reason: string } {
+  const { gl, reason } = translationCtx()
+  if (!gl) return { res: null, reason }
+  try {
+    for (const name of exts) gl.getExtension(name)
+    const type = err.stage === 'vertex' ? gl.VERTEX_SHADER : gl.FRAGMENT_SHADER
+    return { res: compileKeepTranslated(gl, type, err.source), reason: '' }
+  } catch (e) {
+    return { res: { ok: false, log: `(threw: ${String(e)})` }, reason: '' }
+  } finally {
+    releaseCtx(gl)
+  }
+}
+
+/** Cap per diff side: enough to see the construct, short enough for a phone console. */
+const DIFF_CAP = 25
+
+/**
+ * Lines of `a` that `b` does not have, order-preserving and multiplicity-aware
+ * (a line repeated 3x in `a` and 1x in `b` yields 2). Not an LCS diff — for two
+ * translations of the same source the interesting output is exactly "which
+ * lines appeared/disappeared", and this stays cheap and dependency-free.
+ */
+function linesOnlyIn(a: readonly string[], b: readonly string[]): string[] {
+  const remaining = new Map<string, number>()
+  for (const line of b) remaining.set(line, (remaining.get(line) ?? 0) + 1)
+  const out: string[] = []
+  for (const line of a) {
+    const n = remaining.get(line) ?? 0
+    if (n > 0) remaining.set(line, n - 1)
+    else out.push(line)
+  }
+  return out
+}
+
+function capped(lines: readonly string[]): string[] {
+  return lines.length <= DIFF_CAP
+    ? lines.slice()
+    : [...lines.slice(0, DIFF_CAP), `... (${lines.length - DIFF_CAP} more)`]
+}
+
+/**
+ * Compile the failing source twice more — once clean, once with only the first
+ * culprit extension enabled — and diff ANGLE's translated output. That diff is
+ * the one artefact an upstream ANGLE/driver bug report actually needs: it shows
+ * whether the extension changes the generated code at all, or whether identical
+ * code is being rejected purely because the extension is enabled.
+ */
+async function runTranslatedDiff(err: ShaderError, ext: string): Promise<TranslatedDiff> {
+  const clean = captureTranslated(err, [])
+  await idle()
+  const withExt = captureTranslated(err, [ext])
+  await idle()
+
+  const diff: TranslatedDiff = {
+    ext,
+    available: false,
+    identical: false,
+    removed: [],
+    added: [],
+    cleanCompile: clean.res ? fmt(clean.res) : `skipped (${clean.reason})`,
+    extCompile: withExt.res ? fmt(withExt.res) : `skipped (${withExt.reason})`,
+    note: '',
+  }
+
+  const a = clean.res?.translated
+  const b = withExt.res?.translated
+  if (!clean.res || !withExt.res) {
+    diff.note = `unavailable (${clean.reason || withExt.reason || 'no context'})`
+  } else if (!a || !b) {
+    diff.note =
+      'unavailable (WEBGL_debug_shaders exposes no translated source on the scratch context' +
+      `; clean=${a ? 'got it' : 'empty'}, +ext=${b ? 'got it' : 'empty'})`
+  } else if (a === b) {
+    diff.available = true
+    diff.identical = true
+    diff.note = `identical (${a.split('\n').length} lines, ${a.length} chars) - the extension changes the driver's verdict, not ANGLE's output`
+  } else {
+    diff.available = true
+    const aLines = a.split('\n')
+    const bLines = b.split('\n')
+    diff.removed = capped(linesOnlyIn(aLines, bLines))
+    diff.added = capped(linesOnlyIn(bLines, aLines))
+    diff.note = `${aLines.length} vs ${bLines.length} lines`
+  }
+
+  const header = `translated diff (clean vs +${ext}):`
+  if (!diff.available || diff.identical) {
+    logForensics(`${header} ${diff.note} | clean ${diff.cleanCompile} | +ext ${diff.extCompile}`)
+  } else {
+    logForensics(
+      `${header} ${diff.note} | clean ${diff.cleanCompile} | +ext ${diff.extCompile}\n` +
+        [...diff.removed.map((l) => `- ${l}`), ...diff.added.map((l) => `+ ${l}`)].join('\n'),
+    )
+  }
+  return diff
 }
 
 /** Replay `entries` (in order) on a fresh context, then compile the failing source. */
@@ -700,7 +1059,9 @@ export async function runForensics(err: ShaderError): Promise<void> {
   let f4 = 'skipped'
   let f5 = 'skipped'
   let attributes: WebGLContextAttributes | null = null
-  let culpritExt: string | null = null
+  let culpritExts: string[] = []
+  let culpritsComplete = false
+  let translatedDiff: TranslatedDiff | null = null
   let culpritIndex: number | null = null
 
   try {
@@ -746,7 +1107,8 @@ export async function runForensics(err: ShaderError): Promise<void> {
     }
     await idle()
 
-    // F3 — every supported extension enabled, then bisect if that breaks it.
+    // F3 — every supported extension enabled, then bisect (repeatedly, since
+    // the device has more than one culprit) if that breaks it.
     try {
       let exts: string[] = []
       const r = trial(err, (gl) => {
@@ -756,12 +1118,41 @@ export async function runForensics(err: ShaderError): Promise<void> {
       f3 = outcome(r)
       logForensics(`F3 all-ext (${exts.length}) ${label}: ${r ? fmt(r) : 'skipped (no context)'}`)
       if (r && !r.ok && f2 === 'ok' && exts.length > 1) {
-        culpritExt = bisectExtensions(err, exts)
-        logForensics(`F3 culprit ext = ${culpritExt ?? 'unresolved'}`)
+        const search = await findCulpritExtensions(err, exts)
+        culpritExts = search.culprits
+        culpritsComplete = search.complete
+        if (search.culprits.length === 0) {
+          logForensics(`F3 all culprits = none resolved (${search.stop})`)
+        } else if (search.complete) {
+          logForensics(
+            `F3 all culprits = ${search.culprits.join(', ')} (compile passes with these excluded)`,
+          )
+        } else {
+          logForensics(
+            `F3 all culprits = ${search.culprits.join(', ')} ` +
+              `(bound reached, list may be incomplete: ${search.stop})`,
+          )
+        }
       }
     } catch (e) {
       f3 = 'error'
       logForensics(`F3 crashed: ${String(e)}`)
+    }
+    await idle()
+
+    // F3d — with a culprit confirmed, capture the evidence an upstream ANGLE
+    // bug report needs: the translated source with and without that extension.
+    try {
+      const first = culpritExts[0]
+      if (!first) {
+        logForensics('translated diff: skipped (no culprit extension confirmed)')
+      } else if (contextBudgetExhausted) {
+        logForensics(`translated diff (clean vs +${first}): skipped (context budget exhausted)`)
+      } else {
+        translatedDiff = await runTranslatedDiff(err, first)
+      }
+    } catch (e) {
+      logForensics(`translated diff crashed: ${String(e)}`)
     }
     await idle()
 
@@ -813,7 +1204,13 @@ export async function runForensics(err: ShaderError): Promise<void> {
       logForensics(`F5 crashed: ${String(e)}`)
     }
 
-    const summary = `summary: F0 ${f0}, F1 ${f1}, F2 ${f2}, F3 ${f3}, F4 ${f4}, F5 ${f5}`
+    const culpritList =
+      culpritExts.length === 0
+        ? 'none'
+        : culpritExts.join(', ') + (culpritsComplete ? '' : ' (incomplete)')
+    const summary =
+      `summary: F0 ${f0}, F1 ${f1}, F2 ${f2}, F3 ${f3}, F4 ${f4}, F5 ${f5}` +
+      ` | culprit exts = ${culpritList}`
     logForensics(summary)
     try {
       const store = (window.__ufForensics ??= [])
@@ -827,7 +1224,10 @@ export async function runForensics(err: ShaderError): Promise<void> {
         f4,
         f5,
         attributes,
-        culpritExt,
+        culpritExt: culpritExts[0] ?? null,
+        culpritExts,
+        culpritsComplete,
+        translatedDiff,
         culpritIndex,
         summary,
       })
