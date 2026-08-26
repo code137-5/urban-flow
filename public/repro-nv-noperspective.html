@@ -186,11 +186,66 @@ const VARIANTS = [
   ['V9 minimal (control)', MINIMAL_SHADER],
 ];
 
+// The exact ANGLE-translated output (captured on the affected device via
+// WEBGL_debug_shaders) that the Adreno 710 driver rejects with an empty log.
+// Emitted by ANGLE as #version 310 es because WEBGL_clip_cull_distance was
+// enabled on the context; the clean-context translation is identical except
+// for "#version 300 es".
+const TRANSLATED_310 = `#version 310 es
+struct _uFragmentGeometry {
+  highp vec2 _uuv;
+} _ugeometry;
+layout(std140) uniform _uparticleUniforms{
+  highp vec4 _ubounds;
+  highp vec4 _uscale;
+  highp vec4 _umotion;
+  highp vec4 _ulifecycle;
+  highp vec4 _ucolor;
+  highp vec4 _usprite;
+} _uparticle;
+layout(std140) uniform _ulayerUniforms{
+  highp float _uopacity;
+} _ulayer;
+in highp float _uvAlpha;
+layout(location = 0) out highp vec4 _ufragColor;
+void _uDECKGL_FILTER_COLOR(inout highp vec4 _ucolor, in _uFragmentGeometry _ugeometry){
+}
+void main(){
+  (_ufragColor = vec4(0.0, 0.0, 0.0, 0.0));
+  const mediump float sbce = 0.5;
+  highp float _udist = length((gl_PointCoord - sbce));
+  highp float _ucore = smoothstep(0.25, 0.0599999987, _udist);
+  const highp float sbcf = 1.0;
+  const highp float sbd0 = 2.0;
+  highp float _ufalloff = max((sbcf - (_udist * sbd0)), 0.0);
+  highp float _uhalo = (_ufalloff * _ufalloff);
+  const highp float sbd1 = 0.5;
+  highp float _uglow = (_ucore + ((_uparticle._usprite.z * _uhalo) * sbd1));
+  highp float _ua = (((_uglow * _uvAlpha) * _uparticle._ucolor.w) * _ulayer._uopacity);
+  if ((_ua < 0.00999999978))
+  {
+    discard;
+  }
+  (_ufragColor = vec4((_uparticle._ucolor.xyz * _ua), _ua));
+  _uDECKGL_FILTER_COLOR(_ufragColor, _ugeometry);
+}
+`;
+
+// The three extensions proven (by on-device bisection) to each independently
+// trigger the failure when enabled on the compiling context.
+const CULPRIT_EXTS = [
+  'WEBGL_clip_cull_distance',
+  'NV_shader_noperspective_interpolation',
+  'OES_shader_multisample_interpolation',
+];
+
 function compileOnFreshCtx(source, enableExt) {
   const gl = document.createElement('canvas').getContext('webgl2');
   if (!gl) return { ok: false, log: '(no webgl2 context)', noCtx: true };
   try {
-    if (enableExt) gl.getExtension('NV_shader_noperspective_interpolation');
+    // enableExt: false = clean, true = NV ext (legacy), string = that extension.
+    if (enableExt) gl.getExtension(
+      typeof enableExt === 'string' ? enableExt : 'NV_shader_noperspective_interpolation');
     const sh = gl.createShader(gl.FRAGMENT_SHADER);
     gl.shaderSource(sh, source);
     gl.compileShader(sh);
@@ -231,6 +286,39 @@ function main() {
     ? '<span class="fail">BUG REPRODUCED</span>: identical source, only difference is getExtension().'
     : (a.ok && b.ok ? '<span class="ok">Not reproduced on this device.</span>'
                     : '<span class="warn">Unexpected: case A failed - different problem on this device.</span>')) + '</p>');
+
+  out.push('<h1>Per-extension repro (full shader, one ext enabled each)</h1>' +
+    '<table><tr><th>extension</th><th>supported</th><th>result</th><th>info log</th></tr>');
+  const allExts = (function () {
+    const g = document.createElement('canvas').getContext('webgl2');
+    const list = g ? (g.getSupportedExtensions() || []) : [];
+    const l2 = g && g.getExtension('WEBGL_lose_context'); if (l2) l2.loseContext();
+    return list;
+  })();
+  for (const ext of CULPRIT_EXTS) {
+    const sup = allExts.includes(ext);
+    const r = sup ? compileOnFreshCtx(FULL_SHADER, ext) : { ok: true, log: '(not supported - skipped)' };
+    out.push('<tr><td>' + esc(ext) + '</td><td>' + sup + '</td><td class="' +
+      (sup ? (r.ok ? 'ok">ok' : 'fail">FAIL') : 'warn">skipped') + '</td><td>' + esc(r.log) + '</td></tr>');
+  }
+  out.push('</table>');
+
+  out.push('<h1>Translated-source evidence</h1>' +
+    '<p>WebGL itself only accepts "#version 300 es", so the 310 es source ANGLE feeds ' +
+    'the native driver cannot be re-tested through WebGL here. Evidence captured on the ' +
+    'affected device via WEBGL_debug_shaders: with a culprit extension enabled, ANGLE\'s ' +
+    'translation of the shader below is byte-identical to the clean translation EXCEPT ' +
+    'the first line ("#version 310 es" instead of "#version 300 es"), and the driver ' +
+    'then rejects it with an empty info log. D3 confirms the translated body itself is ' +
+    'valid on this device under 300 es.</p>' +
+    '<table><tr><th>test</th><th>result</th><th>info log</th></tr>');
+  const d3 = compileOnFreshCtx(
+    TRANSLATED_310.replace('#version 310 es', '#version 300 es'), false);
+  out.push('<tr><td>D3 ANGLE-translated body as 300 es (no extensions)</td><td class="' +
+    (d3.ok ? 'ok">ok' : 'fail">FAIL') + '</td><td>' + esc(d3.log) + '</td></tr></table>');
+  out.push('<p>Native repro material for the driver team (compile via native GLES on ' +
+    'Adreno 710 - rejected there, per the WEBGL_debug_shaders evidence above):</p>' +
+    '<pre>' + esc(TRANSLATED_310) + '</pre>');
 
   out.push('<h1>Minimization ladder (all with ext enabled)</h1>' +
     '<table><tr><th>variant</th><th>result</th><th>info log</th></tr>');
