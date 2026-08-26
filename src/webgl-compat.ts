@@ -345,13 +345,16 @@ type GL = WebGL2RenderingContext & {
 
 /**
  * Extensions hidden from the app (see module doc, point 5). On-device
- * forensics bisected the enabled-extension list twice: enabling EITHER of
- * these interpolation-qualifier extensions makes Adreno 710 reject valid
- * fragment shaders with an empty info log. Nothing here uses them.
+ * forensics bisected the enabled-extension list three times: enabling ANY of
+ * these makes ANGLE emit the translated shader as `#version 310 es` instead
+ * of `300 es` (proven by translated-source diff), and the Adreno 710 driver
+ * rejects the otherwise-identical 310 es shader with an empty info log.
+ * Nothing in this app uses these extensions.
  */
 const BLOCKED_EXTENSIONS = new Set([
   'nv_shader_noperspective_interpolation',
   'oes_shader_multisample_interpolation',
+  'webgl_clip_cull_distance',
 ])
 
 function patchExtensions(proto: GL | undefined): void {
