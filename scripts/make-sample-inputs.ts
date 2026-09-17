@@ -3,10 +3,11 @@ import { fileURLToPath } from 'node:url'
 import { SEOUL_BOUNDS } from '../src/data/bounds.ts'
 
 /**
- * Generate small SYNTHETIC raw inputs for the six new datasets into data/raw/,
+ * Generate small SYNTHETIC raw inputs for the five density/population datasets
+ * into data/raw/ (the DEM is real — see preprocess/contours.ts),
  * so the preprocessing pipeline can run end-to-end before any real Seoul open
  * data exists. These are not real figures — just plausible spatial structure
- * (mountains for DEM, CBD/residential hotspots for the density/population sets)
+ * (CBD/residential hotspots for the density/population sets)
  * so each dataset renders as visibly distinct contour terrain.
  *
  * Deterministic: a seeded mulberry32 PRNG (bare Math.random is banned in this
@@ -55,8 +56,6 @@ const JUNGGU = { lng: 126.98, lat: 37.566 }
 const YEOUIDO = { lng: 126.924, lat: 37.526 }
 const JAMSIL = { lng: 127.1, lat: 37.513 }
 const HONGDAE = { lng: 126.923, lat: 37.556 }
-const BUKHANSAN = { lng: 126.99, lat: 37.66 }
-const GWANAKSAN = { lng: 126.96, lat: 37.445 }
 const NOWON = { lng: 127.06, lat: 37.655 }
 const GANGSEO = { lng: 126.84, lat: 37.56 }
 const SONGPA = { lng: 127.12, lat: 37.5 }
@@ -94,20 +93,6 @@ interface SampleSpec {
 }
 
 const SPECS: SampleSpec[] = [
-  // DEM — elevation: high mountains ring the city, low basin in the middle.
-  {
-    id: 'dem',
-    seed: 0xde_11,
-    base: 25,
-    noise: 0.05,
-    cores: [
-      { ...BUKHANSAN, sigmaM: 4200, amp: 700 },
-      { ...GWANAKSAN, sigmaM: 3600, amp: 560 },
-      { lng: 127.02, lat: 37.65, sigmaM: 3000, amp: 300 }, // Suraksan-ish
-      { lng: 126.83, lat: 37.58, sigmaM: 2600, amp: 180 }, // western hills
-      { lng: 127.14, lat: 37.55, sigmaM: 2600, amp: 160 }, // eastern hills
-    ],
-  },
   // 생활인구 — daytime CBD-heavy, hourly.
   {
     id: 'saenghwal-ingu',
