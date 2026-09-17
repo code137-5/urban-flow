@@ -24,11 +24,16 @@ export interface GeoPoint {
 
 /** Identifiers for the datasets compared in the dashboard. */
 export type DatasetId =
+  // Live: real measurements, loaded from public/data/<id>.json (see scripts/preprocess).
+  | 'dem'
+  | 'temperature'
+  | 'noise'
+  | 'humidity'
+  // Parked: synthetic placeholders. Adapters and JSONs stay on disk, but these are
+  // not registered in src/data/sources/index.ts until real data replaces them.
   | 'ttareungi'
   | 'saenghwal-idong'
   | 'subway'
-  // Preprocessed datasets loaded from public/data/<id>.json (see scripts/preprocess).
-  | 'dem'
   | 'saenghwal-ingu'
   | 'jumin-ingu'
   | 'building-density'
@@ -47,8 +52,9 @@ export interface DatasetMeta {
   accent: string
   /**
    * KDE bandwidth (meters) this dataset renders with by default. Unset → the
-   * panel's global default. Real terrain wants a much tighter σ than the
-   * synthetic density fields, or the ridges blur into blobs.
+   * panel's global default. Real terrain wants a tight σ or the ridges blur
+   * into blobs; sensor fields want a wider one to average out single sites.
+   * Gridded jobs must pad past 3σ (scripts/preprocess/job.ts `padMeters`).
    */
   kdeSigmaMeters?: number
 }
