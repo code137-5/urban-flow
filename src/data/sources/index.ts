@@ -17,6 +17,7 @@ const preprocessedSources: DataSource[] = [
     description: 'Seoul terrain elevation as contours',
     unit: 'meters',
     accent: '#0f62fe', // IBM Blue 60
+    kdeSigmaMeters: 600, // real relief; the 1800 default is tuned for density blobs
   }),
   staticSource({
     id: 'saenghwal-ingu',

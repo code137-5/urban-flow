@@ -45,6 +45,12 @@ export interface DatasetMeta {
   unit: string
   /** Accent hue (particles/contours) so panels are visually distinguishable. */
   accent: string
+  /**
+   * KDE bandwidth (meters) this dataset renders with by default. Unset → the
+   * panel's global default. Real terrain wants a much tighter σ than the
+   * synthetic density fields, or the ridges blur into blobs.
+   */
+  kdeSigmaMeters?: number
 }
 
 /** Pluggable data adapter. One implementation per dataset in src/data/sources/. */

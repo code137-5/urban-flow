@@ -45,7 +45,7 @@ function run(ids: string[]): void {
       cellMeters: job.cellMeters,
       aggregation: job.aggregation,
     })
-    writeDataset(job.id, clipToSeoul(gridded))
+    writeDataset(job.id, job.clip === false ? gridded : clipToSeoul(gridded))
   }
   console.log('Done.')
 }

@@ -41,10 +41,11 @@ export function DataNotice() {
           Sample data, for now
         </h2>
         <p className={styles.body}>
-          Every dataset on this dashboard is currently <strong>synthetic</strong> — generated
-          to demonstrate the contour terrain and particle flow. It will be replaced with real
-          Seoul open data (따릉이 bike share, living migration, subway ridership, and more),
-          one dataset at a time.
+          Except for <strong>Elevation (DEM)</strong>, which is real Seoul terrain, every
+          dataset on this dashboard is currently <strong>synthetic</strong> — generated to
+          demonstrate the contour terrain and particle flow. The rest will be replaced with
+          real Seoul open data (따릉이 bike share, living migration, subway ridership, and
+          more), one dataset at a time.
         </p>
         <div className={styles.actions} ref={buttonRef}>
           <Button variant="primary" onClick={dismiss}>
