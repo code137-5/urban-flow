@@ -369,13 +369,20 @@ export function TerrainPanel({
   // Recompute the heightmap only when the data or the KDE bandwidth changes —
   // color/count tweaks (also in `controls`) must not re-run the expensive KDE.
   // Deferred a frame so the loading label paints before the main thread blocks.
+  // While the σ knob is untouched (still at the global default) the dataset's
+  // own default applies; once the user moves it in ?tune, the knob wins.
+  const datasetSigma = source.meta.kdeSigmaMeters
+  const sigma =
+    controls.sigma === DEFAULT_CONTROLS.sigma && datasetSigma !== undefined
+      ? datasetSigma
+      : controls.sigma
   useEffect(() => {
     if (!points) return
     let alive = true
     const id = setTimeout(() => {
       const hm = computeHeightmap(points, SEOUL_BOUNDS, {
         gridSize: GRID_SIZE,
-        sigmaMeters: controls.sigma,
+        sigmaMeters: sigma,
       })
       if (alive) setHeightmap(hm)
     }, 0)
@@ -383,7 +390,7 @@ export function TerrainPanel({
       alive = false
       clearTimeout(id)
     }
-  }, [points, controls.sigma])
+  }, [points, sigma])
 
   // lil-gui color tuner (opt-in via ?tune). Dynamically imported so it never
   // ships in the main bundle for normal visitors; mirrors widget values into
