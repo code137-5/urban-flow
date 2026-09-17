@@ -119,9 +119,9 @@ const DEFAULT_CONTROLS: Controls = {
   // KDE bandwidth (m). ~1800m makes the field read as continuous terrain
   // rather than isolated peaks over flat ground (tuned in the reference).
   sigma: 1800,
-  // Contour half-width in interval units (hairline look, tuned by the user);
+  // Contour half-width in interval units (bold poster line, tuned by the user);
   // the shader keeps thickness slope-invariant, this scales it overall.
-  lineWidth: 0.01,
+  lineWidth: 0.05,
   // Saturated summit plateau (마루) opacity — 0 removes the filled cap.
   capOpacity: 0.2,
   lineColor: '#393939', // low elevation — dark hairline gray
@@ -134,11 +134,11 @@ const DEFAULT_CONTROLS: Controls = {
   riverColor: '#9aa9b7', // desaturated steel gray
   riverOpacity: 0.42,
   particlesOn: true,
-  particleCount: 1000,
+  particleCount: 400,
   particleSpeed: 700,
   particleJitter: 0,
   particleFlowBlend: 0, // 0 = flow along contour lines, 1 = straight uphill
-  particleSize: 4.5,
+  particleSize: 3,
   particleGlow: 0.6, // halo strength — overlapping particles bloom additively
   particleTrail: 0.7, // ghost-afterimage strength (0 = off)
   particleTrailLength: 8, // ghost snapshots in the trail
@@ -431,7 +431,7 @@ export function TerrainPanel({
 
       const pt = g.addFolder('particles')
       pt.add(s, 'particlesOn').name('enabled').onChange(sync)
-      pt.add(s, 'particleCount', 500, 8000, 500).name('count').onChange(sync)
+      pt.add(s, 'particleCount', 100, 8000, 100).name('count').onChange(sync)
       pt.add(s, 'particleSpeed', 0, 2000, 50).name('speed (m/s)').onChange(sync)
       pt.add(s, 'particleJitter', 0, 1, 0.05).name('jitter').onChange(sync)
       pt.add(s, 'particleFlowBlend', 0, 1, 0.05).name('flow → uphill').onChange(sync)
