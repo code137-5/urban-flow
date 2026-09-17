@@ -1,7 +1,4 @@
 import type { DataSource, DatasetId } from '../types'
-import { ttareungiSource } from './ttareungi'
-import { saenghwalIdongSource } from './saenghwalIdong'
-import { subwaySource } from './subway'
 import { staticSource } from './staticSource'
 
 /**
@@ -20,53 +17,47 @@ const preprocessedSources: DataSource[] = [
     kdeSigmaMeters: 600, // real relief; the 1800 default is tuned for density blobs
   }),
   staticSource({
-    id: 'saenghwal-ingu',
-    label: 'Living population (생활인구)',
-    description: 'De-facto population present by area',
-    unit: 'people',
+    id: 'temperature',
+    label: 'Temperature (기온)',
+    description: 'Air temperature, 2023 yearly median per S-DoT sensor',
+    unit: '°C',
     accent: '#4589ff', // IBM Blue 50
+    kdeSigmaMeters: 1200, // ~12 sensors fall inside σ, enough to average out microsite scatter
   }),
   staticSource({
-    id: 'jumin-ingu',
-    label: 'Registered population (주민등록인구)',
-    description: 'Resident population by home address',
-    unit: 'residents',
+    id: 'noise',
+    label: 'Noise (소음)',
+    description: 'Ambient noise, 2023 yearly median per S-DoT sensor',
+    unit: 'dB',
     accent: '#78a9ff', // IBM Blue 40
+    kdeSigmaMeters: 700, // tight on purpose: keeps the road-corridor structure legible
   }),
   staticSource({
-    id: 'building-density',
-    label: 'Building floor-area density (건축연면적)',
-    description: 'Gross building floor area per area',
-    unit: 'ratio',
+    id: 'humidity',
+    label: 'Humidity (습도)',
+    description: 'Relative humidity, 2023 yearly median per S-DoT sensor',
+    unit: '%RH',
     accent: '#a6c8ff', // IBM Blue 30
-  }),
-  staticSource({
-    id: 'residential-density',
-    label: 'Residential floor-area density (주거면적)',
-    description: 'Housing floor area per area',
-    unit: 'ratio',
-    accent: '#0043ce', // IBM Blue 70
-  }),
-  staticSource({
-    id: 'commercial-density',
-    label: 'Commercial floor-area density (상업면적)',
-    description: 'Commercial floor area per area',
-    unit: 'ratio',
-    accent: '#d0e2ff', // IBM Blue 20
+    kdeSigmaMeters: 1000, // readings are coarsely quantized, so they need extra smoothing
   }),
 ]
 
 /**
+ * Parked: synthetic placeholder datasets, kept out of the registry until real
+ * data exists. Their adapters (`ttareungi`, `saenghwalIdong`, `subway`) and
+ * public/data JSONs stay on disk, and their ids stay in `DatasetId`:
+ *   ttareungi · saenghwal-idong · subway · saenghwal-ingu · jumin-ingu ·
+ *   building-density · residential-density · commercial-density
+ * To bring one back: re-import its adapter (or re-add its `staticSource({...})`
+ * entry above) and list it in `SOURCES`.
+ */
+
+/**
  * Registry of available datasets. Add a new dataset by writing a `DataSource`
  * adapter and appending it here — the pipeline and UI pick it up automatically.
- * Order (ttareungi first) sets the dashboard's default panel dataset.
+ * Order (dem first) sets the dashboard's default panel dataset.
  */
-export const SOURCES: DataSource[] = [
-  ttareungiSource,
-  saenghwalIdongSource,
-  subwaySource,
-  ...preprocessedSources,
-]
+export const SOURCES: DataSource[] = [...preprocessedSources]
 
 export const DEFAULT_SOURCE = SOURCES[0]
 

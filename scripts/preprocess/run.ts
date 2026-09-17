@@ -1,25 +1,21 @@
 import { SEOUL_BOUNDS } from '../../src/data/bounds.ts'
 import { clipToSeoul } from './clip.ts'
-import { aggregateToGrid } from './grid.ts'
+import { aggregateToGrid, padBounds } from './grid.ts'
 import type { DatasetJob } from './job.ts'
 import { writeDataset } from './io.ts'
 import { demJob } from './datasets/dem.ts'
-import { saenghwalInguJob } from './datasets/saenghwalIngu.ts'
-import { juminInguJob } from './datasets/juminIngu.ts'
-import { buildingDensityJob } from './datasets/buildingDensity.ts'
-import { residentialDensityJob } from './datasets/residentialDensity.ts'
-import { commercialDensityJob } from './datasets/commercialDensity.ts'
+import { temperatureJob } from './datasets/temperature.ts'
+import { noiseJob } from './datasets/noise.ts'
+import { humidityJob } from './datasets/humidity.ts'
 
 // Registry of preprocessing jobs. Add a dataset by writing an adapter under
 // datasets/ and appending it here (mirrors src/data/sources/index.ts).
-const JOBS: DatasetJob[] = [
-  demJob,
-  saenghwalInguJob,
-  juminInguJob,
-  buildingDensityJob,
-  residentialDensityJob,
-  commercialDensityJob,
-]
+//
+// Parked, not deleted: datasets/{saenghwalIngu,juminIngu,buildingDensity,
+// residentialDensity,commercialDensity}.ts read data/raw/<id>.csv, which only
+// ever existed as generated samples — a no-arg run died on the missing files.
+// Drop the real CSVs into data/raw/ and re-add the import + the job here.
+const JOBS: DatasetJob[] = [demJob, temperatureJob, noiseJob, humidityJob]
 
 /**
  * raw → grid → Seoul clip → public/data/<id>.json, for the selected jobs
@@ -39,9 +35,12 @@ function run(ids: string[]): void {
 
   console.log(`Preprocessing ${selected.length} dataset(s) → public/data/`)
   for (const job of selected) {
-    const cells = job.toCells()
+    // One bounds for both steps: aggregateToGrid drops whatever falls outside it,
+    // so a job that rasterizes onto the grid itself must see the same rectangle.
+    const bounds = job.padMeters ? padBounds(SEOUL_BOUNDS, job.padMeters) : SEOUL_BOUNDS
+    const cells = job.toCells(bounds)
     const gridded = aggregateToGrid(cells, {
-      bounds: SEOUL_BOUNDS,
+      bounds,
       cellMeters: job.cellMeters,
       aggregation: job.aggregation,
     })

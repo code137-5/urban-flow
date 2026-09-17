@@ -7,8 +7,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Urban Flow** — a data-visualization website about Seoul (서울). Seoul data is rendered as
 **contour-line terrain** (등고선) with **GPU particles flowing over it**, plus an interactive
 **comparison dashboard** that starts with one panel and grows to **up to 6** as the user adds
-datasets (duplicates allowed once all are shown). Three datasets: 따릉이 (public bike) ·
-생활이동 (population OD) · 지하철 승하차. The global particle budget is split across active
+datasets (duplicates allowed once all four are shown). Four **real** datasets: Elevation (DEM,
+rasterized from 20 m elevation contour lines) · Temperature (기온) · Noise (소음) · Humidity
+(습도) — the last three are 2023 yearly medians from the S-DoT sensor network. No time-of-day
+dimension in any of them. The earlier synthetic datasets (따릉이, 생활이동, 지하철 승하차,
+population, floor-area densities) are **parked** — hidden from `SOURCES`, adapters and JSONs
+kept on disk — until real data exists. The global particle budget is split across active
 panels (`src/layers/particleBudget.ts`).
 
 Architecture is based on the experimental repo `Aete/seoul-terrain-animation` (referenced,
@@ -16,7 +20,7 @@ not forked — its data/heightmap/contour pipeline and shaders are the template;
 system was never built, so we implement that ourselves).
 
 Page structure: **Hero → About → Dashboard**. UI copy is English; code identifiers English.
-(Dataset names may keep their Korean originals in parentheses, e.g. "Ttareungi (public bike)".)
+(Dataset names may keep their Korean originals in parentheses, e.g. "Temperature (기온)".)
 
 ## Commands
 
@@ -35,6 +39,10 @@ Visualization pipeline: **data adapter → KDE heightmap → contour shader → 
 rendered by deck.gl. The whole pipeline depends only on the generic `GeoPoint` model
 (`src/data/types.ts`), never on dataset-specific fields — new datasets plug in as a
 `DataSource` adapter under `src/data/sources/` (dir added in P2).
+
+Scalar-field datasets (DEM, S-DoT sensors) must be preprocessed onto a **complete regular
+grid** (`scripts/preprocess/contours.ts`, `scripts/preprocess/sensors.ts`) — the runtime KDE
+is a density sum, so raw sample points would render sensor density, not the measured value.
 
 - `src/data/types.ts` — `GeoPoint`, `DataSource`, `DatasetId`, `Bounds`. The contract every
   layer depends on. Datasets are source-agnostic weighted geopoints (+ optional `weightByHour`

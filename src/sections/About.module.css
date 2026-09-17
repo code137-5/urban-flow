@@ -68,9 +68,11 @@
   margin-top: var(--space-xxl);
 }
 
+/* Four datasets: 4-across at desktop so no card is orphaned on a second row.
+   The 673–1056px query below folds it to a clean 2×2. */
 .cardGrid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: var(--grid-gutter);
 }
 

@@ -22,7 +22,7 @@ const STEPS: Step[] = [
   {
     no: '02',
     title: 'Contour terrain · KDE heightmap',
-    body: 'Kernel density estimation builds a heightmap, and contour lines connecting equal density draw the city as if it were terrain.',
+    body: 'Kernel smoothing builds a heightmap from the data, and contour lines connecting equal values draw the city as if it were terrain.',
   },
   {
     no: '03',
@@ -33,23 +33,28 @@ const STEPS: Step[] = [
 
 const DATASETS: Dataset[] = [
   {
-    title: 'Ttareungi (public bike)',
-    body: 'Bike usage across Seoul’s rental stations, aggregated to map everyday range and short-distance travel demand as terrain.',
-    unit: 'Unit · rentals',
+    title: 'Elevation (DEM)',
+    body: 'Seoul’s real terrain, rasterized from the city’s 20 m elevation contour lines — the ground every other layer is read against.',
+    unit: 'Unit · meters',
   },
   {
-    title: 'Living migration (population OD)',
-    body: 'Population flowing between districts, tracing the city’s origin-and-destination relationships.',
-    unit: 'Unit · people moved',
+    title: 'Temperature (기온)',
+    body: 'Air temperature as 2023 yearly medians from the S-DoT city sensor network, interpolated between sensors into a continuous field.',
+    unit: 'Unit · °C',
   },
   {
-    title: 'Subway ridership',
-    body: 'Boarding and alighting counts per station, capturing congestion at transit hubs and their rhythm across the day.',
-    unit: 'Unit · riders',
+    title: 'Noise (소음)',
+    body: 'Ambient noise as 2023 yearly medians from the same sensor network — the widest-ranging of the three, so loud and quiet districts separate clearly.',
+    unit: 'Unit · dB',
+  },
+  {
+    title: 'Humidity (습도)',
+    body: 'Relative humidity as 2023 yearly medians from the same sensor network, tracing where the city’s air stays damp and where it runs dry.',
+    unit: 'Unit · %RH',
   },
 ]
 
-/** Project explanation section — concept, pipeline, and the three datasets. */
+/** Project explanation section — concept, pipeline, and the four datasets. */
 export function About() {
   return (
     <Section id="about" divided>
@@ -62,7 +67,7 @@ export function About() {
           <p className={styles.lead}>
             Urban Flow renders Seoul’s public data as contour-line terrain and
             visualizes the city’s movement with GPU particles flowing over it. See
-            how density shifts across the hours, and where different datasets
+            how each layer of the city rises and falls, and where different datasets
             overlap or diverge — all compared on a single screen.
           </p>
         </div>
@@ -81,7 +86,7 @@ export function About() {
         </div>
 
         <div className={styles.datasets}>
-          <h3 className={styles.subhead}>Three datasets</h3>
+          <h3 className={styles.subhead}>Four datasets</h3>
           <div className={styles.cardGrid}>
             {DATASETS.map((dataset) => (
               <article key={dataset.title} className={styles.card}>

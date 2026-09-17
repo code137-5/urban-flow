@@ -2,7 +2,7 @@ import type { Bounds, GeoPoint } from '../../src/data/types.ts'
 
 // Meters per degree of latitude — same constant the frontend KDE uses
 // (src/data/heightmap.ts) so preprocessing and rendering share one geodesy.
-const M_PER_DEG_LAT = 111320
+export const M_PER_DEG_LAT = 111320
 
 /** A raw observation before gridding: a value (and optional hourly split) at a point. */
 export interface RawCell {
@@ -23,6 +23,55 @@ export interface GridOptions {
   aggregation?: Aggregation
 }
 
+/** Geometry of the regular grid `bounds` + `cellMeters` imply. */
+export interface GridDims {
+  cols: number
+  rows: number
+  /** Meters per degree of longitude at the bounds' center latitude. */
+  mPerDegLng: number
+  spanLng: number
+  spanLat: number
+}
+
+/**
+ * The one cols/rows formula. Every producer of grid cells (aggregateToGrid,
+ * contours.ts, sensors.ts) derives its layout from here, so cell centres line up
+ * 1:1 and a 'mean' aggregation over one-sample-per-cell input is a pass-through.
+ *
+ * Cells are `cellMeters` *nominal*: cols/rows are rounded, so the real cell is a
+ * fraction of a meter off. Positions come from the span fractions, never from
+ * multiplying cellMeters, so that rounding never accumulates.
+ */
+export function gridDims(bounds: Bounds, cellMeters: number): GridDims {
+  const [minLng, minLat, maxLng, maxLat] = bounds
+  const centerLat = (minLat + maxLat) / 2
+  const mPerDegLng = M_PER_DEG_LAT * Math.cos((centerLat * Math.PI) / 180)
+  const spanLng = maxLng - minLng
+  const spanLat = maxLat - minLat
+  return {
+    cols: Math.max(1, Math.round((spanLng * mPerDegLng) / cellMeters)),
+    rows: Math.max(1, Math.round((spanLat * M_PER_DEG_LAT) / cellMeters)),
+    mPerDegLng,
+    spanLng,
+    spanLat,
+  }
+}
+
+/**
+ * Grow `bounds` by `meters` on every side, with the same flat-earth scaling
+ * gridDims uses. The padding is symmetric, so the center latitude — and with it
+ * `mPerDegLng` — is unchanged: gridDims over the padded bounds keeps the same
+ * geodesy as over the original.
+ */
+export function padBounds(bounds: Bounds, meters: number): Bounds {
+  const [minLng, minLat, maxLng, maxLat] = bounds
+  const centerLat = (minLat + maxLat) / 2
+  const mPerDegLng = M_PER_DEG_LAT * Math.cos((centerLat * Math.PI) / 180)
+  const dLng = meters / mPerDegLng
+  const dLat = meters / M_PER_DEG_LAT
+  return [minLng - dLng, minLat - dLat, maxLng + dLng, maxLat + dLat]
+}
+
 /**
  * Bin raw observations onto a regular grid over `bounds` at `cellMeters`
  * resolution, then emit one {@link GeoPoint} per non-empty cell at its centroid.
@@ -37,13 +86,7 @@ export function aggregateToGrid(
   { bounds, cellMeters, aggregation = 'sum' }: GridOptions,
 ): GeoPoint[] {
   const [minLng, minLat, maxLng, maxLat] = bounds
-  const centerLat = (minLat + maxLat) / 2
-  const mPerDegLng = M_PER_DEG_LAT * Math.cos((centerLat * Math.PI) / 180)
-
-  const spanLng = maxLng - minLng
-  const spanLat = maxLat - minLat
-  const cols = Math.max(1, Math.round((spanLng * mPerDegLng) / cellMeters))
-  const rows = Math.max(1, Math.round((spanLat * M_PER_DEG_LAT) / cellMeters))
+  const { cols, rows, spanLng, spanLat } = gridDims(bounds, cellMeters)
 
   const sums = new Float64Array(cols * rows)
   const counts = new Int32Array(cols * rows)

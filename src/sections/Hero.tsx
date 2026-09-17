@@ -31,9 +31,9 @@ export function Hero() {
           <h1 className={styles.headline}>Urban Flow</h1>
 
           <p className={styles.subhead}>
-            Seoul's daily rhythm, rendered as contour-line terrain with GPU
-            particles flowing over it. Stack bike-share, population movement, and
-            subway data into a living landscape — and compare how the city breathes,
+            Seoul's physical fabric, rendered as contour-line terrain with GPU
+            particles flowing over it. Stack elevation, temperature, noise, and
+            humidity into a living landscape — and compare how the city varies,
             all on one screen.
           </p>
 
