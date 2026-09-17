@@ -8,7 +8,7 @@ import { Dashboard } from './sections/Dashboard'
 /**
  * Urban Flow landing composition.
  * Structure: TopNav → Hero → About → Dashboard → Footer,
- * plus a once-per-session synthetic-data notice dialog.
+ * plus a load-time data-source notice dialog.
  */
 export default function App() {
   return (

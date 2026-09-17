@@ -3,9 +3,10 @@ import { Button } from './Button'
 import styles from './DataNotice.module.css'
 
 /**
- * Load-time notice: every dataset on the dashboard is currently synthetic,
- * to be swapped for real Seoul open data one by one. Shown on EVERY page
- * load / new window (no dismissal persistence — per product decision).
+ * Load-time data-source notice: where the four dashboard datasets come from —
+ * Seoul's elevation contour lines, and 2023 yearly medians from the S-DoT
+ * sensor network interpolated between sensors. Shown on EVERY page load /
+ * new window (no dismissal persistence — per product decision).
  * Carbon Gray 100 dialog — flat 0px corners, hairline border, no shadow.
  */
 export function DataNotice() {
@@ -38,14 +39,14 @@ export function DataNotice() {
       >
         <p className={styles.eyebrow}>Notice</p>
         <h2 id="data-notice-title" className={styles.title}>
-          Sample data, for now
+          Where this data comes from
         </h2>
         <p className={styles.body}>
-          Except for <strong>Elevation (DEM)</strong>, which is real Seoul terrain, every
-          dataset on this dashboard is currently <strong>synthetic</strong> — generated to
-          demonstrate the contour terrain and particle flow. The rest will be replaced with
-          real Seoul open data (따릉이 bike share, living migration, subway ridership, and
-          more), one dataset at a time.
+          <strong>Elevation (DEM)</strong> is rasterized from Seoul's elevation contour
+          lines. <strong>Temperature</strong>, <strong>Noise</strong> and{' '}
+          <strong>Humidity</strong> are 2023 yearly medians from the S-DoT city sensor
+          network, interpolated between roughly 800–900 sensors. Values far from any sensor
+          — the mountains, the airport, the river margins — are therefore estimates.
         </p>
         <div className={styles.actions} ref={buttonRef}>
           <Button variant="primary" onClick={dismiss}>
