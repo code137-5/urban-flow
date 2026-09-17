@@ -9,13 +9,18 @@ import { sensorsPath, sensorsToCells } from '../sensors.ts'
  * Not clipped, and padded: the whole range is ~13–21 °C, so a truncation rim at
  * the border would set the frontend's percentile floor and flatten the map.
  *
- * PAD_METERS covers the widest 3σ among the sensor datasets — temperature's own
- * σ = 1200 m (src/data/sources/index.ts) → 3600 m. Raise it in step if any of
- * those σ go above ~1300 m; measured sample-density ripple inside SEOUL_BOUNDS
- * is 7.5% at 2000 m of pad and 0.25% at 4000 m.
+ * PAD_METERS covers the widest KDE cutoff (4σ, src/data/heightmap.ts) among the
+ * sensor datasets — temperature's own σ = 1200 m (src/data/sources/index.ts) →
+ * 4800 m. Raise it in step if any of those σ go above 1250 m.
+ *
+ * IDW reaches wider than the sensors.ts defaults: the city spans ~2 °C while
+ * neighbouring sites disagree by ±0.5 °C, so a dozen-site average still carries
+ * single-site scatter. 40 sites / ε = 800 m keeps the district-scale heat island
+ * and drops the speckle.
  */
 const CELL_METERS = 500
-const PAD_METERS = 4000
+const PAD_METERS = 5000
+const IDW = { neighbours: 40, epsilonMeters: 800 }
 
 export const temperatureJob: DatasetJob = {
   id: 'temperature',
@@ -24,5 +29,5 @@ export const temperatureJob: DatasetJob = {
   clip: false,
   padMeters: PAD_METERS,
   toCells: (bounds) =>
-    sensorsToCells(sensorsPath('temperature'), 'temperature_median', bounds, CELL_METERS),
+    sensorsToCells(sensorsPath('temperature'), 'temperature_median', bounds, CELL_METERS, IDW),
 }

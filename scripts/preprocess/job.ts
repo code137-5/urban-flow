@@ -23,7 +23,7 @@ export interface DatasetJob {
   clip?: boolean
   /**
    * Extra sample margin, in meters, grown on every side of SEOUL_BOUNDS before
-   * gridding. Must exceed the frontend KDE's 3σ cutoff (src/data/heightmap.ts):
+   * gridding. Must exceed the frontend KDE's 4σ cutoff (src/data/heightmap.ts):
    * the 자치구 polygon touches/crosses SEOUL_BOUNDS on the N and E sides, so
    * without the margin the Gaussian sum truncates inside the mask and that rim
    * becomes the 1st-percentile floor `floorToLowest` subtracts (src/data/field.ts)

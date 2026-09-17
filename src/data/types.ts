@@ -54,7 +54,7 @@ export interface DatasetMeta {
    * KDE bandwidth (meters) this dataset renders with by default. Unset → the
    * panel's global default. Real terrain wants a tight σ or the ridges blur
    * into blobs; sensor fields want a wider one to average out single sites.
-   * Gridded jobs must pad past 3σ (scripts/preprocess/job.ts `padMeters`).
+   * Gridded jobs must pad past 4σ (scripts/preprocess/job.ts `padMeters`).
    */
   kdeSigmaMeters?: number
 }

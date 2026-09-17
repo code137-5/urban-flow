@@ -1,6 +1,8 @@
 import type { Bounds, GeoPoint } from './types'
 
 const M_PER_DEG_LAT = 111320
+/** Kernel support in σ. Preprocessed grids must pad past this (DatasetJob.padMeters). */
+const CUTOFF_SIGMAS = 4
 
 /**
  * Weighted Gaussian KDE of `points` onto a `gridSize`×`gridSize` grid over `bounds`.
@@ -9,7 +11,11 @@ const M_PER_DEG_LAT = 111320
  *   h(x,y) = Σᵢ wᵢ · exp(-‖(x,y) - pointᵢ‖² / 2σ²)     (distance in meters)
  *
  * Design notes (technique ported from Aete/seoul-terrain-animation):
- * - Each point only touches cells within a σ×3 radius → O(N·k²).
+ * - Each point only touches cells within a σ×4 window → O(N·k²). Not σ×3: the
+ *   kernel is still 1.1% at 3σ, and on a regular sample grid that step leaves a
+ *   ~0.2% lattice ripple in the sum. Invisible on terrain, but a narrow-range field
+ *   (temperature spans ~4% in log1p) puts a whole contour interval inside it, and
+ *   the map fills with a ring per sample. At 4σ the ripple is ~0.015%.
  * - `useLogWeight` (default) compresses the heavy tail so one hotspot (e.g. Gangnam)
  *   doesn't flatten everything else.
  * - Normalization clips at the 99th percentile then divides — NOT max-normalization,
@@ -34,8 +40,8 @@ export function buildHeightmap(
   const cellMetersX = (spanLng * mPerDegLng) / gridSize
   const cellMetersY = (spanLat * M_PER_DEG_LAT) / gridSize
 
-  // Cutoff radius (σ×3) expressed in grid cells per axis.
-  const cutoff = sigmaMeters * 3
+  // Cutoff radius (σ×4) expressed in grid cells per axis.
+  const cutoff = sigmaMeters * CUTOFF_SIGMAS
   const radCols = Math.ceil(cutoff / cellMetersX)
   const radRows = Math.ceil(cutoff / cellMetersY)
   const inv2Sigma2 = 1 / (2 * sigmaMeters * sigmaMeters)

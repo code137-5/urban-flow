@@ -9,7 +9,7 @@ import { sensorsPath, sensorsToCells } from '../sensors.ts'
  * (PAD_METERS kept uniform across the three — see temperature.ts).
  */
 const CELL_METERS = 500
-const PAD_METERS = 4000
+const PAD_METERS = 5000
 
 export const humidityJob: DatasetJob = {
   id: 'humidity',

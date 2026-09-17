@@ -19,6 +19,16 @@ const NEIGHBOURS = 12
  */
 const EPSILON_METERS = 250
 
+/**
+ * Per-dataset reach of the average. The defaults keep local structure, right when
+ * the signal dwarfs the scatter between neighbouring sites (noise: 35–77 dB);
+ * a field where the two are comparable widens both (see datasets/temperature.ts).
+ */
+export interface IdwOptions {
+  neighbours?: number
+  epsilonMeters?: number
+}
+
 /** data/raw/environment_2023_yearly_median_<variable>.geojson (S-DoT, 2023). */
 export function sensorsPath(variable: string): string {
   return fileURLToPath(
@@ -48,6 +58,7 @@ export function sensorsToCells(
   valueProp: string,
   bounds: Bounds,
   cellMeters: number,
+  { neighbours = NEIGHBOURS, epsilonMeters = EPSILON_METERS }: IdwOptions = {},
 ): RawCell[] {
   const fc = JSON.parse(readFileSync(path, 'utf8')) as FeatureCollection<
     Point,
@@ -76,10 +87,10 @@ export function sensorsToCells(
   }
   if (values.length === 0) throw new Error(`no finite ${valueProp} values in ${path}`)
 
-  const k = Math.min(NEIGHBOURS, values.length)
-  const eps2 = EPSILON_METERS * EPSILON_METERS
-  // Running k-nearest, kept sorted by squared distance (k is tiny: insertion sort
-  // beats sorting all ~900 sensors per cell).
+  const k = Math.min(neighbours, values.length)
+  const eps2 = epsilonMeters * epsilonMeters
+  // Running k-nearest, kept sorted by squared distance (k is small: insertion
+  // sort beats sorting all ~900 sensors per cell).
   const nearD2 = new Float64Array(k)
   const nearValue = new Float64Array(k)
 
@@ -117,7 +128,7 @@ export function sensorsToCells(
     }
   }
   console.log(
-    `  sensors: ${values.length} sites (${skipped} skipped), ${cols}×${rows} grid, k=${k}`,
+    `  sensors: ${values.length} sites (${skipped} skipped), ${cols}×${rows} grid, k=${k}, ε=${epsilonMeters} m`,
   )
   return cells
 }
