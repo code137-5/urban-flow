@@ -1,3 +1,4 @@
+import type { Bounds } from '../../src/data/types.ts'
 import type { Aggregation, RawCell } from './grid.ts'
 
 /**
@@ -20,5 +21,19 @@ export interface DatasetJob {
    * still hides everything outside Seoul.
    */
   clip?: boolean
-  toCells(): RawCell[]
+  /**
+   * Extra sample margin, in meters, grown on every side of SEOUL_BOUNDS before
+   * gridding. Must exceed the frontend KDE's 3σ cutoff (src/data/heightmap.ts):
+   * the 자치구 polygon touches/crosses SEOUL_BOUNDS on the N and E sides, so
+   * without the margin the Gaussian sum truncates inside the mask and that rim
+   * becomes the 1st-percentile floor `floorToLowest` subtracts (src/data/field.ts)
+   * — which crushes the contrast of a narrow-range field (13–21 °C) down to the
+   * artefact instead of the data. Unset = no padding.
+   */
+  padMeters?: number
+  /**
+   * `bounds` is SEOUL_BOUNDS grown by `padMeters`; jobs that rasterize onto the
+   * grid themselves must use it so their cell centres match run.ts's gridding.
+   */
+  toCells(bounds: Bounds): RawCell[]
 }

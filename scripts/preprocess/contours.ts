@@ -2,10 +2,8 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import type { FeatureCollection, LineString } from 'geojson'
 import type { Bounds } from '../../src/data/types.ts'
+import { M_PER_DEG_LAT, gridDims } from './grid.ts'
 import type { RawCell } from './grid.ts'
-
-// Same geodesy as grid.ts / src/data/heightmap.ts.
-const M_PER_DEG_LAT = 111320
 
 /**
  * The source DEM was masked on a 0.025° tile grid (outside the mask = 0), so every
@@ -60,14 +58,9 @@ export function contoursToCells(
     { elev: number }
   >
 
-  const [minLng, minLat, maxLng, maxLat] = bounds
-  const centerLat = (minLat + maxLat) / 2
-  const mPerDegLng = M_PER_DEG_LAT * Math.cos((centerLat * Math.PI) / 180)
-  const spanLng = maxLng - minLng
-  const spanLat = maxLat - minLat
-  // Same cols/rows formula as aggregateToGrid so the cell centres line up 1:1.
-  const cols = Math.max(1, Math.round((spanLng * mPerDegLng) / cellMeters))
-  const rows = Math.max(1, Math.round((spanLat * M_PER_DEG_LAT) / cellMeters))
+  const [minLng, minLat] = bounds
+  // Same dims as aggregateToGrid so the cell centres line up 1:1.
+  const { cols, rows, mPerDegLng, spanLng, spanLat } = gridDims(bounds, cellMeters)
 
   // Vertices in metres relative to the bounds origin, bucketed per grid cell.
   const buckets = new Map<number, Vertex[]>()
