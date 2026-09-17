@@ -8,6 +8,9 @@ import type { DatasetJob } from '../job.ts'
  * already emits one sample per grid cell, so 'mean' is a pass-through; the
  * frontend KDE then smooths the regular grid into the contour surface.
  * 250 m cells keep the Bukhansan / Inwangsan ridges from washing out.
+ * Not clipped to the 자치구: the contours cover terrain past the border, and the
+ * KDE needs those samples so the boundary cuts through real elevation instead
+ * of dropping to a cliff.
  */
 const CELL_METERS = 250
 
@@ -15,5 +18,6 @@ export const demJob: DatasetJob = {
   id: 'dem',
   cellMeters: CELL_METERS,
   aggregation: 'mean',
+  clip: false,
   toCells: () => contoursToCells(CONTOURS_PATH, SEOUL_BOUNDS, CELL_METERS),
 }

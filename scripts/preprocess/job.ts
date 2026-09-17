@@ -12,5 +12,13 @@ export interface DatasetJob {
   cellMeters: number
   /** 'sum' for counts, 'mean' for intensive fields (elevation, density). */
   aggregation: Aggregation
+  /**
+   * Drop cells outside the 25 자치구 before writing (default true). Set false for
+   * continuous fields like elevation: the frontend KDE is an un-normalized sum,
+   * so without samples beyond the boundary the surface falls to zero along the
+   * edge and the city reads as a cliff-walled plateau. The render-time mask
+   * still hides everything outside Seoul.
+   */
+  clip?: boolean
   toCells(): RawCell[]
 }
