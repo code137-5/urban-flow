@@ -1,5 +1,5 @@
 import { Layer, project32 } from '@deck.gl/core'
-import type { DefaultProps, LayerContext, UpdateParameters } from '@deck.gl/core'
+import type { DefaultProps, LayerContext, LayerProps, UpdateParameters } from '@deck.gl/core'
 import { BufferTransform, Model } from '@luma.gl/engine'
 import type { Buffer, Texture } from '@luma.gl/core'
 import type { Heightmap } from '../data/types'
@@ -35,7 +35,7 @@ export type ParticleLayerProps = {
   glow?: number
   /** Trail (ghost afterimage) strength 0–1; 0 disables the history draws. */
   trail?: number
-  /** Number of ghost snapshots in the trail (1–12). Change = history realloc. */
+  /** Number of ghost snapshots in the trail — one extra draw call each. Change = history realloc. */
   trailLength?: number
   /** Simulation steps between snapshots — spacing of the ghosts. */
   trailGap?: number
@@ -49,7 +49,7 @@ export type ParticleLayerProps = {
   maxFps?: number
 }
 
-const defaultProps: DefaultProps<ParticleLayerProps> = {
+const defaultProps: DefaultProps<ParticleLayerProps & Pick<LayerProps, 'parameters'>> = {
   numParticles: { type: 'number', value: 1000 },
   heightScale: { type: 'number', value: 4000 },
   fadeFraction: { type: 'number', value: 0.1 },
@@ -63,6 +63,23 @@ const defaultProps: DefaultProps<ParticleLayerProps> = {
   zOffset: { type: 'number', value: 15 },
   animate: true,
   maxFps: { type: 'number', value: 30 },
+  // GPU state goes through the LAYER's `parameters`, not the Model's: deck.gl
+  // calls model.setParameters(layer parameters) on every draw, wiping whatever the
+  // Model was created with. Left to deck's defaults the sprites alpha-blend and
+  // WRITE DEPTH, so a trail's near-transparent quad hides any particle passing
+  // behind it (particles blink as they cross trails).
+  parameters: {
+    // Additive blending (premultiplied): order-independent light over #161616.
+    blendColorOperation: 'add',
+    blendColorSrcFactor: 'one',
+    blendColorDstFactor: 'one',
+    blendAlphaOperation: 'add',
+    blendAlphaSrcFactor: 'one',
+    blendAlphaDstFactor: 'one',
+    // Occluded by foreground ridges, but never occludes anything itself.
+    depthWriteEnabled: false,
+    depthCompare: 'less-equal',
+  },
 }
 
 // Static per-slot attribute layout (floats per particle).
@@ -270,18 +287,6 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
         { name: 'seeds', format: 'float32x2' },
       ],
       isInstanced: false,
-      parameters: {
-        // Additive blending (premultiplied): order-independent light over #161616.
-        blendColorOperation: 'add',
-        blendColorSrcFactor: 'one',
-        blendColorDstFactor: 'one',
-        blendAlphaOperation: 'add',
-        blendAlphaSrcFactor: 'one',
-        blendAlphaDstFactor: 'one',
-        // Occluded by foreground ridges, but never occludes anything itself.
-        depthWriteEnabled: false,
-        depthCompare: 'less-equal',
-      },
     })
     model.setAttributes({ seeds: seedBuffer })
 
@@ -384,8 +389,8 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
         destinationBuffer: buf,
         size: src.byteLength,
       })
-      encoder.finish()
-      encoder.destroy()
+      // finish() only returns the recorded commands — they run on submit.
+      device.submit(encoder.finish())
       history.push(buf)
     }
     this.state.history = history
@@ -479,8 +484,8 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
         destinationBuffer: target,
         size: target.byteLength,
       })
-      encoder.finish()
-      encoder.destroy()
+      // finish() only returns the recorded commands — they run on submit.
+      this.context.device.submit(encoder.finish())
       this.state.historyHead = (this.state.historyHead + 1) % history.length
     }
 

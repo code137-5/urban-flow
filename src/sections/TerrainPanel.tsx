@@ -14,7 +14,8 @@ import { particlesSupported } from '../layers/particleSupport'
 import { detectGpuTier, perPanelParticleCount } from '../layers/particleBudget'
 import { usePanelVisibility } from '../hooks/usePanelVisibility'
 import { shaderErrors, type ShaderError } from '../webgl-compat'
-import { bikeTripSource } from '../data/bikeTrips'
+import { FLOWS, FLOW_BY_ID, odTripSource } from '../data/odTrips'
+import type { FlowId } from '../data/odTrips'
 import { randomTripSource } from '../data/trips'
 import { TripSchedule, sharedTripSchedule } from '../layers/tripSchedule'
 import type { DataSource, GeoPoint, Heightmap } from '../data/types'
@@ -23,11 +24,6 @@ import styles from './Dashboard.module.css'
 // 200×200 matches the reference; the Seoul mask (point-in-polygon) for it is
 // ~1s once per session, then cached.
 const GRID_SIZE = 200
-
-// The speed knob is tuned for cross-city random trips (~10 km → ~15 s). Real bike
-// trips are short — median ~1 km, p90 ~3 km — so at that speed they would blink
-// out in under a second. Scaling it down gives a median trip ~1.4 s, p90 ~4 s.
-const BIKE_SPEED_SCALE = 0.6
 
 // Fallback view used before the container has been measured (0×0 during the
 // first render, before layout). The shared INITIAL_VIEW_STATE frames Seoul for a
@@ -124,7 +120,6 @@ type Controls = {
   riverColor: string
   riverOpacity: number
   particlesOn: boolean
-  particleCount: number
   particleSpeed: number
   particleTimeScale: number
   particleFade: number
@@ -133,7 +128,8 @@ type Controls = {
   particleTrail: number
   particleTrailLength: number
   particleTrailGap: number
-  particleColor: string
+  bikeColor: string
+  migrationColor: string
   particleOpacity: number
 }
 
@@ -162,18 +158,19 @@ const DEFAULT_CONTROLS: Controls = {
   riverColor: '#9aa9b7', // desaturated steel gray
   riverOpacity: 0.42,
   particlesOn: true,
-  particleCount: 400,
   // Centre of the trip speed range (m/s, poster-scale) — trips run at 0.7–1.3×
-  // this; bike trips additionally × BIKE_SPEED_SCALE.
+  // this; real OD flows additionally × their `speedScale` (odTrips.ts).
   particleSpeed: 1250,
   particleTimeScale: 1, // playback multiplier on every trip's duration
   particleFade: 0.1, // fade in/out window at each end, fraction of the trip
   particleSize: 4,
   particleGlow: 0.6, // halo strength — overlapping particles bloom additively
-  particleTrail: 0.7, // ghost-afterimage strength (0 = off)
-  particleTrailLength: 8, // ghost snapshots in the trail
+  particleTrail: 0.5, // ghost-afterimage strength (0 = off)
+  particleTrailLength: 20, // ghost snapshots in the trail (~4 s of path at gap 6)
   particleTrailGap: 6, // sim steps between snapshots (spacing)
-  particleColor: '#f4f4f4', // near-white — stays legible on both the cyan and the red end of the ramp
+  // One color per flow — the only thing telling them apart (defaults in odTrips.ts).
+  bikeColor: FLOW_BY_ID.bike.color,
+  migrationColor: FLOW_BY_ID.migration.color,
   particleOpacity: 0.85,
 }
 
@@ -237,18 +234,25 @@ function RecenterIcon() {
  * dashboard owns this state so it can mirror one panel's camera across all
  * panels ("sync views"). A null `camera` means "use the fit".
  *
- * Particles play real Ttareungi trips (src/data/bikeTrips.ts) from a schedule
- * shared by every panel, so all panels show the same particles in lockstep and
- * only the terrain under them differs.
+ * Particles play real OD flows (src/data/odTrips.ts) — one color-coded particle
+ * layer per flow switched on in `flows` — from schedules shared by every panel,
+ * so all panels show the same particles in lockstep and only the terrain under
+ * them differs.
  */
 export function TerrainPanel({
   source,
+  flows,
   activePanels = 1,
   camera,
   onCameraChange,
   onResetCamera,
 }: {
   source: DataSource
+  /**
+   * Particles per OD flow, 0 = off — a dashboard-wide choice, so panels stay
+   * comparable. Capped by the global budget (particleBudget.ts).
+   */
+  flows: Record<FlowId, number>
   /** Live panel count — splits the global particle budget (particleBudget.ts). */
   activePanels?: number
   camera: PanelCamera | null
@@ -477,16 +481,16 @@ export function TerrainPanel({
 
       const pt = g.addFolder('particles')
       pt.add(s, 'particlesOn').name('enabled').onChange(sync)
-      pt.add(s, 'particleCount', 100, 8000, 100).name('count').onChange(sync)
       pt.add(s, 'particleSpeed', 100, 2000, 50).name('trip speed (m/s)').onChange(sync)
       pt.add(s, 'particleTimeScale', 0.1, 5, 0.1).name('time scale').onChange(sync)
       pt.add(s, 'particleFade', 0, 0.5, 0.01).name('fade (of trip)').onChange(sync)
       pt.add(s, 'particleSize', 1, 8, 0.5).name('size (px)').onChange(sync)
       pt.add(s, 'particleGlow', 0, 1, 0.05).name('glow').onChange(sync)
       pt.add(s, 'particleTrail', 0, 1, 0.05).name('trail opacity').onChange(sync)
-      pt.add(s, 'particleTrailLength', 1, 12, 1).name('trail length').onChange(sync)
-      pt.add(s, 'particleTrailGap', 1, 12, 1).name('trail gap (steps)').onChange(sync)
-      pt.addColor(s, 'particleColor').name('color').onChange(sync)
+      pt.add(s, 'particleTrailLength', 1, 50, 1).name('trail length').onChange(sync)
+      pt.add(s, 'particleTrailGap', 1, 50, 1).name('trail gap (steps)').onChange(sync)
+      pt.addColor(s, 'bikeColor').name('bike color').onChange(sync)
+      pt.addColor(s, 'migrationColor').name('migration color').onChange(sync)
       pt.add(s, 'particleOpacity', 0, 1, 0.05).name('opacity').onChange(sync)
     })
     return () => {
@@ -496,28 +500,32 @@ export function TerrainPanel({
     }
   }, [])
 
-  // What the particles play: real Ttareungi OD pairs, with random trips as the
-  // fallback when Supabase is unavailable. The schedule is shared page-wide per
-  // (speed, time scale), so every panel at the same settings gets the SAME object
-  // and moves in lockstep. A new schedule rebuilds the particle layer, so it is
-  // keyed on those two knobs only; the heightmap is needed just once, for the
-  // fallback's Seoul mask (identical across datasets).
+  // What the particles play: one schedule per real OD flow. Schedules are shared
+  // page-wide per (flow, speed, time scale), so every panel at the same settings
+  // gets the SAME objects and moves in lockstep. A new schedule rebuilds its
+  // particle layer, so they are keyed on those knobs only; the heightmap is needed
+  // just once, for the fallback's Seoul mask (identical across datasets). Nothing
+  // is fetched until a layer actually asks a schedule for slots.
   const speed = controls.particleSpeed
   const timeScale = controls.particleTimeScale
-  const schedule = useMemo<TripSchedule | null>(() => {
+  const schedules = useMemo(() => {
     if (!heightmap) return null
-    return sharedTripSchedule(`bike|${speed}|${timeScale}`, () => {
-      const speedMps: [number, number] = [speed * 0.7, speed * 1.3]
-      const source = bikeTripSource({
-        fallback: randomTripSource(heightmap, { speedMps }),
-        speedMps: [speedMps[0] * BIKE_SPEED_SCALE, speedMps[1] * BIKE_SPEED_SCALE],
-      })
-      return new TripSchedule(source, timeScale)
-    })
+    const speedMps: [number, number] = [speed * 0.7, speed * 1.3]
+    return FLOWS.map((flow) => ({
+      flow,
+      schedule: sharedTripSchedule(`${flow.id}|${speed}|${timeScale}`, () => {
+        // Without Supabase the bike flow alone falls back to random trips, so the
+        // site still moves; a second random swarm would just be noise.
+        const fallback =
+          flow.id === 'bike' ? randomTripSource(heightmap, { speedMps }) : undefined
+        return new TripSchedule(odTripSource(flow, { fallback, speedMps }), timeScale)
+      }),
+    }))
   }, [heightmap, speed, timeScale])
 
   const layers = useMemo<Layer[]>(() => {
     if (!heightmap) return []
+    const activeFlows = (schedules ?? []).filter(({ flow }) => flows[flow.id] > 0)
     // Flat z=0 reference plate under the terrain: Seoul outline, then parks and
     // river; the contour relief sits on top, with particles above it.
     return [
@@ -538,13 +546,18 @@ export function TerrainPanel({
         peakColor: hexToRgb(controls.peakColor),
         opacity: controls.contourOpacity,
       }),
-      ...(particlesOk && controls.particlesOn && schedule
-        ? [
-            new ParticleLayer({
-              id: `particles-${source.meta.id}`,
+      ...(particlesOk && controls.particlesOn
+        ? activeFlows.map(
+            ({ flow, schedule }) =>
+              new ParticleLayer({
+              id: `particles-${flow.id}-${source.meta.id}`,
               heightmap,
               schedule,
-              numParticles: perPanelParticleCount(activePanels, controls.particleCount),
+              // Each flow is its own particle system, so it takes its own budget share.
+              numParticles: perPanelParticleCount(
+                activePanels * activeFlows.length,
+                flows[flow.id],
+              ),
               // Same knob as the terrain layer → particles always sit on the surface.
               heightScale: controls.height,
               fadeFraction: controls.particleFade,
@@ -553,14 +566,14 @@ export function TerrainPanel({
               trail: controls.particleTrail,
               trailLength: controls.particleTrailLength,
               trailGap: controls.particleTrailGap,
-              color: hexToRgb(controls.particleColor),
+              color: hexToRgb(controls[`${flow.id}Color` as const]),
               opacity: controls.particleOpacity,
               animate,
             }),
-          ]
+          )
         : []),
     ]
-  }, [heightmap, schedule, controls, source.meta.id, particlesOk, animate, activePanels])
+  }, [heightmap, schedules, flows, controls, source.meta.id, particlesOk, animate, activePanels])
 
   if (webglFailed) {
     return (

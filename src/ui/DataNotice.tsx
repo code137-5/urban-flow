@@ -51,9 +51,11 @@ export function DataNotice() {
           — the mountains, the airport, the river margins — are therefore estimates.{' '}
           <strong>Population</strong>, <strong>Businesses</strong> and <strong>Workers</strong>{' '}
           are 2024 counts on Statistics Korea's SGIS 100 m grid, summed per cell with no
-          interpolation. The <strong>particles</strong> replay Ttareungi (따릉이) public-bike
-          station-to-station pairs, sampled in proportion to their trip counts and drawn as
-          straight lines at an illustrative speed.
+          interpolation. The <strong>particles</strong> replay two real origin–destination
+          flows, sampled in proportion to their trip counts and drawn as straight lines at an
+          illustrative speed: Ttareungi (따릉이) public-bike rentals between stations, and Seoul
+          living migration (생활이동) between administrative dongs, with endpoints scattered
+          around each dong's centre.
         </p>
         <div className={styles.actions} ref={buttonRef}>
           <Button variant="primary" onClick={dismiss}>

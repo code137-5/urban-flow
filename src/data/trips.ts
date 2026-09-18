@@ -6,8 +6,8 @@ import type { Bounds, Heightmap } from './types'
  * Every particle plays one `Trip` — a straight line from `origin` to `destination`
  * taking `durationSec` playback seconds — then asks its `TripSource` for the next
  * one. The layer never sees where trips come from: `randomTripSource` below
- * synthesizes them; `bikeTripSource` (bikeTrips.ts) samples real Ttareungi OD
- * pairs from Supabase into the same shape and falls back to the random one.
+ * synthesizes them; `odTripSource` (odTrips.ts) samples real OD pairs — bike
+ * rentals, living migration — from Supabase into the same shape.
  */
 
 /** One origin→destination movement. Coordinates are WGS84 [lng, lat]. */
@@ -50,6 +50,12 @@ export function distanceMeters(a: [number, number], b: [number, number]): number
   const dx = (b[0] - a[0]) * M_PER_DEG_LNG_EQUATOR * Math.cos(midLat)
   const dy = (b[1] - a[1]) * M_PER_DEG_LAT
   return Math.hypot(dx, dy)
+}
+
+/** `p` moved `dx` meters east and `dy` meters north (inverse of `distanceMeters`). */
+export function offsetMeters(p: [number, number], dx: number, dy: number): [number, number] {
+  const lat = p[1] * (Math.PI / 180)
+  return [p[0] + dx / (M_PER_DEG_LNG_EQUATOR * Math.cos(lat)), p[1] + dy / M_PER_DEG_LAT]
 }
 
 /** lng/lat → heightmap UV in [0,1]² over `bounds` (inverse of particle.vs.glsl). */

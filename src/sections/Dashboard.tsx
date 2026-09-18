@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Container, Section, Eyebrow } from '../ui/layout'
 import { DEFAULT_SOURCE, SOURCES, getSource } from '../data/sources'
 import type { DatasetId } from '../data/types'
+import { FLOWS } from '../data/odTrips'
+import type { FlowId } from '../data/odTrips'
 import { TerrainPanel } from './TerrainPanel'
 import type { PanelCamera } from './TerrainPanel'
 import styles from './Dashboard.module.css'
@@ -22,6 +24,16 @@ interface PanelDescriptor {
 
 /** Two full rows of three. */
 const MAX_PANELS = 6
+
+/**
+ * Particles per flow per panel. The ceiling keeps the worst case — 6 panels × 2
+ * flows — inside the desktop particle budget (24,000), so the slider never lies.
+ */
+const DEFAULT_FLOW_COUNTS: Record<FlowId, number> = { bike: 400, migration: 400 }
+const FLOW_COUNT_MIN = 100
+const FLOW_COUNT_MAX = 2000
+const FLOW_COUNT_STEP = 100
+const COUNT_COMMIT_MS = 150
 
 /**
  * Carbon responsive column cap by viewport width (md = 672, lg = 1056):
@@ -55,7 +67,8 @@ function useViewportWidth(): number {
  * responsive grid that caps at 3 columns and wraps onto new rows (up to 6 panels
  * total). Panels are removable down to a minimum of one. The global particle
  * budget re-splits across panels on every add/remove (see particleBudget.ts).
- * Every panel plays the same particles in lockstep (layers/tripSchedule.ts).
+ * Every panel plays the same particles in lockstep (layers/tripSchedule.ts); which
+ * OD flows they are is one dashboard-wide choice, so panels stay comparable.
  */
 export function Dashboard() {
   const [panels, setPanels] = useState<PanelDescriptor[]>(() => [
@@ -78,6 +91,24 @@ export function Dashboard() {
   // comparisons line up out of the box. The toggle stays disabled until a second
   // panel exists (nothing to sync with one panel).
   const [linked, setLinked] = useState(true)
+  // Particle flows drawn in every panel, each its own color: on/off plus a
+  // particles-per-panel count. `flowCounts` tracks the slider thumbs live;
+  // `committedCounts` follows once the drag settles, because a new count rebuilds
+  // every panel's particle buffers.
+  const [flowsOn, setFlowsOn] = useState<Record<FlowId, boolean>>({ bike: true, migration: true })
+  const [flowCounts, setFlowCounts] = useState<Record<FlowId, number>>(DEFAULT_FLOW_COUNTS)
+  const [committedCounts, setCommittedCounts] = useState(flowCounts)
+  useEffect(() => {
+    const id = setTimeout(() => setCommittedCounts(flowCounts), COUNT_COMMIT_MS)
+    return () => clearTimeout(id)
+  }, [flowCounts])
+  const flows = useMemo<Record<FlowId, number>>(
+    () => ({
+      bike: flowsOn.bike ? committedCounts.bike : 0,
+      migration: flowsOn.migration ? committedCounts.migration : 0,
+    }),
+    [flowsOn, committedCounts],
+  )
   const firstKey = panels[0]?.key ?? 0
 
   const cameraFor = (key: number): PanelCamera | null => cameras[linked ? firstKey : key] ?? null
@@ -151,6 +182,43 @@ export function Dashboard() {
         </p>
 
         <div className={styles.toolbar}>
+          <div className={styles.flowToggles} role="group" aria-label="Particle flows">
+            {FLOWS.map((flow) => (
+              <div className={styles.flowControl} key={flow.id}>
+                <label className={styles.syncToggle}>
+                  <input
+                    type="checkbox"
+                    className={styles.syncCheckbox}
+                    checked={flowsOn[flow.id]}
+                    onChange={() => setFlowsOn((prev) => ({ ...prev, [flow.id]: !prev[flow.id] }))}
+                  />
+                  <span
+                    className={styles.flowSwatch}
+                    style={{ background: flow.color }}
+                    aria-hidden="true"
+                  />
+                  <span>{flow.label}</span>
+                </label>
+                <input
+                  type="range"
+                  className={styles.slider}
+                  min={FLOW_COUNT_MIN}
+                  max={FLOW_COUNT_MAX}
+                  step={FLOW_COUNT_STEP}
+                  value={flowCounts[flow.id]}
+                  disabled={!flowsOn[flow.id]}
+                  aria-label={`${flow.label} particles per panel`}
+                  onChange={(e) =>
+                    setFlowCounts((prev) => ({ ...prev, [flow.id]: Number(e.target.value) }))
+                  }
+                  onDoubleClick={() =>
+                    setFlowCounts((prev) => ({ ...prev, [flow.id]: DEFAULT_FLOW_COUNTS[flow.id] }))
+                  }
+                />
+                <span className={styles.flowCount}>{flowCounts[flow.id]}</span>
+              </div>
+            ))}
+          </div>
           <label className={styles.syncToggle}>
             <input
               type="checkbox"
@@ -207,6 +275,7 @@ export function Dashboard() {
                 <div className={styles.canvas}>
                   <TerrainPanel
                     source={source}
+                    flows={flows}
                     activePanels={panels.length}
                     camera={cameraFor(panel.key)}
                     onCameraChange={handleCameraChange(panel.key)}
