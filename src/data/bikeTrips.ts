@@ -75,17 +75,30 @@ let reservoir: Promise<Leg[] | null> | null = null
 function loadReservoir(): Promise<Leg[] | null> {
   reservoir ??= (async () => {
     try {
+      // Exactly one "[urban-flow] Supabase: …" status line per page load, so the
+      // console answers "is this build talking to Supabase?" at a glance.
       const client = await getSupabase()
       if (!client) {
-        console.warn('[urban-flow] Supabase is not configured; particles play random trips')
+        console.warn(
+          '[urban-flow] Supabase: NOT CONFIGURED — VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY ' +
+            'are missing from this build; particles play random trips',
+        )
         return null
       }
+      const startedAt = performance.now()
       const stations = await loadStations(client)
+      // An RLS-blocked table answers 200 with zero rows, not an error.
+      if (stations.size === 0) throw new Error(`${STATION_TABLE} returned no rows (RLS policy?)`)
       const batches = await Promise.all(
         Array.from({ length: RESERVOIR_BATCHES }, () => sampleLegs(client, stations)),
       )
       const legs = batches.flat()
-      if (legs.length === 0) throw new Error('no bike trips sampled')
+      if (legs.length === 0) throw new Error(`${SAMPLE_RPC} returned no usable pairs`)
+      console.info(
+        `[urban-flow] Supabase: connected — ${stations.size} stations, ${legs.length} weighted ` +
+          `OD samples in ${Math.round(performance.now() - startedAt)} ms; particles play real ` +
+          'Ttareungi trips',
+      )
 
       setInterval(() => {
         if (document.hidden) return
@@ -98,7 +111,7 @@ function loadReservoir(): Promise<Leg[] | null> {
       }, REFRESH_MS)
       return legs
     } catch (err) {
-      console.warn('[urban-flow] bike trips unavailable; particles play random trips:', err)
+      console.warn('[urban-flow] Supabase: FAILED — particles play random trips:', err)
       return null
     }
   })()
