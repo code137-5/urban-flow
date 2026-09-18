@@ -14,6 +14,8 @@ import { particlesSupported } from '../layers/particleSupport'
 import { detectGpuTier, perPanelParticleCount } from '../layers/particleBudget'
 import { usePanelVisibility } from '../hooks/usePanelVisibility'
 import { shaderErrors, type ShaderError } from '../webgl-compat'
+import { randomTripSource } from '../data/trips'
+import type { TripSource } from '../data/trips'
 import type { DataSource, GeoPoint, Heightmap } from '../data/types'
 import styles from './Dashboard.module.css'
 
@@ -101,8 +103,8 @@ type Controls = {
   particlesOn: boolean
   particleCount: number
   particleSpeed: number
-  particleJitter: number
-  particleFlowBlend: number
+  particleTimeScale: number
+  particleFade: number
   particleSize: number
   particleGlow: number
   particleTrail: number
@@ -110,7 +112,6 @@ type Controls = {
   particleTrailGap: number
   particleColor: string
   particleOpacity: number
-  particleMaxAge: number
 }
 
 const DEFAULT_CONTROLS: Controls = {
@@ -135,9 +136,11 @@ const DEFAULT_CONTROLS: Controls = {
   riverOpacity: 0.42,
   particlesOn: true,
   particleCount: 400,
+  // Centre of the random trip generator's speed range (m/s, poster-scale) —
+  // trips run at 0.7–1.3× this. Irrelevant once trips come from an API.
   particleSpeed: 700,
-  particleJitter: 0,
-  particleFlowBlend: 0, // 0 = flow along contour lines, 1 = straight uphill
+  particleTimeScale: 1, // playback multiplier on every trip's duration
+  particleFade: 0.1, // fade in/out window at each end, fraction of the trip
   particleSize: 3,
   particleGlow: 0.6, // halo strength — overlapping particles bloom additively
   particleTrail: 0.7, // ghost-afterimage strength (0 = off)
@@ -145,7 +148,6 @@ const DEFAULT_CONTROLS: Controls = {
   particleTrailGap: 6, // sim steps between snapshots (spacing)
   particleColor: '#ff8880', // warm coral — pops against the cool monochrome terrain
   particleOpacity: 0.85,
-  particleMaxAge: 800,
 }
 
 // Cap the canvas backing-store resolution: 6 panels at DPR 3 is what actually
@@ -207,15 +209,22 @@ function RecenterIcon() {
  * the size-fitted view, and every change is reported via `onCameraChange`. The
  * dashboard owns this state so it can mirror one panel's camera across all
  * panels ("sync views"). A null `camera` means "use the fit".
+ *
+ * Particles play trips from `tripSource` (src/data/trips.ts). When none is
+ * given, the panel synthesizes random in-mask trips — this prop is where an API
+ * adapter plugs in later.
  */
 export function TerrainPanel({
   source,
+  tripSource: tripSourceProp,
   activePanels = 1,
   camera,
   onCameraChange,
   onResetCamera,
 }: {
   source: DataSource
+  /** Where particle trips come from. Default: random trips inside Seoul. */
+  tripSource?: TripSource
   /** Live panel count — splits the global particle budget (particleBudget.ts). */
   activePanels?: number
   camera: PanelCamera | null
@@ -432,9 +441,9 @@ export function TerrainPanel({
       const pt = g.addFolder('particles')
       pt.add(s, 'particlesOn').name('enabled').onChange(sync)
       pt.add(s, 'particleCount', 100, 8000, 100).name('count').onChange(sync)
-      pt.add(s, 'particleSpeed', 0, 2000, 50).name('speed (m/s)').onChange(sync)
-      pt.add(s, 'particleJitter', 0, 1, 0.05).name('jitter').onChange(sync)
-      pt.add(s, 'particleFlowBlend', 0, 1, 0.05).name('flow → uphill').onChange(sync)
+      pt.add(s, 'particleSpeed', 100, 2000, 50).name('trip speed (m/s)').onChange(sync)
+      pt.add(s, 'particleTimeScale', 0.1, 5, 0.1).name('time scale').onChange(sync)
+      pt.add(s, 'particleFade', 0, 0.5, 0.01).name('fade (of trip)').onChange(sync)
       pt.add(s, 'particleSize', 1, 8, 0.5).name('size (px)').onChange(sync)
       pt.add(s, 'particleGlow', 0, 1, 0.05).name('glow').onChange(sync)
       pt.add(s, 'particleTrail', 0, 1, 0.05).name('trail opacity').onChange(sync)
@@ -442,7 +451,6 @@ export function TerrainPanel({
       pt.add(s, 'particleTrailGap', 1, 12, 1).name('trail gap (steps)').onChange(sync)
       pt.addColor(s, 'particleColor').name('color').onChange(sync)
       pt.add(s, 'particleOpacity', 0, 1, 0.05).name('opacity').onChange(sync)
-      pt.add(s, 'particleMaxAge', 60, 900, 30).name('lifetime (frames)').onChange(sync)
     })
     return () => {
       cancelled = true
@@ -450,6 +458,16 @@ export function TerrainPanel({
       tunerActive = false
     }
   }, [])
+
+  // Trip supplier for the particles. The random generator is keyed on the
+  // heightmap (it samples the Seoul mask) and the speed knob only — a new
+  // source rebuilds the particle layer, so color/size tweaks must not touch it.
+  const speed = controls.particleSpeed
+  const tripSource = useMemo<TripSource | null>(() => {
+    if (tripSourceProp) return tripSourceProp
+    if (!heightmap) return null
+    return randomTripSource(heightmap, { speedMps: [speed * 0.7, speed * 1.3] })
+  }, [tripSourceProp, heightmap, speed])
 
   const layers = useMemo<Layer[]>(() => {
     if (!heightmap) return []
@@ -473,18 +491,17 @@ export function TerrainPanel({
         peakColor: hexToRgb(controls.peakColor),
         opacity: controls.contourOpacity,
       }),
-      ...(particlesOk && controls.particlesOn
+      ...(particlesOk && controls.particlesOn && tripSource
         ? [
             new ParticleLayer({
               id: `particles-${source.meta.id}`,
               heightmap,
+              tripSource,
               numParticles: perPanelParticleCount(activePanels, controls.particleCount),
               // Same knob as the terrain layer → particles always sit on the surface.
               heightScale: controls.height,
-              speed: controls.particleSpeed,
-              jitter: controls.particleJitter,
-              flowBlend: controls.particleFlowBlend,
-              maxAge: controls.particleMaxAge,
+              timeScale: controls.particleTimeScale,
+              fadeFraction: controls.particleFade,
               pointSize: controls.particleSize,
               glow: controls.particleGlow,
               trail: controls.particleTrail,
@@ -497,7 +514,7 @@ export function TerrainPanel({
           ]
         : []),
     ]
-  }, [heightmap, controls, source.meta.id, particlesOk, animate, activePanels])
+  }, [heightmap, tripSource, controls, source.meta.id, particlesOk, animate, activePanels])
 
   if (webglFailed) {
     return (

@@ -40,6 +40,14 @@ rendered by deck.gl. The whole pipeline depends only on the generic `GeoPoint` m
 (`src/data/types.ts`), never on dataset-specific fields — new datasets plug in as a
 `DataSource` adapter under `src/data/sources/` (dir added in P2).
 
+Particles are **trip players**, not flow-field walkers: each particle slot plays one `Trip`
+`{ origin, destination, durationSec }` (`src/data/trips.ts`) as a straight line over the
+terrain, then takes the next one from a `TripSource` via a prefetching `TripQueue`
+(`src/layers/tripQueue.ts`, batched requests). `randomTripSource` synthesizes trips today;
+an API adapter later implements the same `TripSource.next(count)` and is passed to
+`Dashboard`/`TerrainPanel` as `tripSource`. The CPU predicts each trip's end from
+`startAt + duration / timeScale` — no GPU readback — and rewrites only that slot.
+
 Scalar-field datasets (DEM, S-DoT sensors) must be preprocessed onto a **complete regular
 grid** (`scripts/preprocess/contours.ts`, `scripts/preprocess/sensors.ts`) — the runtime KDE
 is a density sum, so raw sample points would render sensor density, not the measured value.

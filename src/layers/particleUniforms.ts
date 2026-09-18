@@ -9,9 +9,9 @@ export type ParticleProps = {
   bounds: [number, number, number, number]
   /** 1/spanXMeters, 1/spanYMeters, heightScale (m at h=1), zOffset (m). */
   scale: [number, number, number, number]
-  /** speed (m/s at |grad|=1), jitter 0–1, flowBlend 0=isoline 1=uphill, dt (s). */
+  /** timeScale (playback multiplier on trip durations), unused, unused, dt (s). */
   motion: [number, number, number, number]
-  /** maxAge (frames), time (s, wrapped), respawn-age fraction, fade (frames). */
+  /** progress end (always 1), simulation time (s), unused, fade window (fraction of a trip). */
   lifecycle: [number, number, number, number]
   /** Particle color, RGB 0–1 + base alpha. */
   color: [number, number, number, number]
