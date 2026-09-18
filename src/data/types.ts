@@ -31,6 +31,7 @@ export type DatasetId =
   | 'humidity'
   | 'population'
   | 'companies'
+  | 'employees'
   // Parked: synthetic placeholders. Adapters and JSONs stay on disk, but these are
   // not registered in src/data/sources/index.ts until real data replaces them.
   | 'ttareungi'

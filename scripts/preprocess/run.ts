@@ -9,6 +9,7 @@ import { noiseJob } from './datasets/noise.ts'
 import { humidityJob } from './datasets/humidity.ts'
 import { populationJob } from './datasets/population.ts'
 import { companiesJob } from './datasets/companies.ts'
+import { employeesJob } from './datasets/employees.ts'
 
 // Registry of preprocessing jobs. Add a dataset by writing an adapter under
 // datasets/ and appending it here (mirrors src/data/sources/index.ts).
@@ -24,6 +25,7 @@ const JOBS: DatasetJob[] = [
   humidityJob,
   populationJob,
   companiesJob,
+  employeesJob,
 ]
 
 /**

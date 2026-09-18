@@ -68,10 +68,11 @@
   margin-top: var(--space-xxl);
 }
 
-/* Six datasets: 3×2 at desktop, 2×3 at tablet (query below) — no orphans. */
+/* Seven datasets: 4 + 3 at desktop (the least lopsided split of seven),
+   2-wide at tablet (query below). */
 .cardGrid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: var(--grid-gutter);
 }
 
