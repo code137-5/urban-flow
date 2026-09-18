@@ -6,8 +6,8 @@ import type { Bounds, Heightmap } from './types'
  * Every particle plays one `Trip` — a straight line from `origin` to `destination`
  * taking `durationSec` playback seconds — then asks its `TripSource` for the next
  * one. The layer never sees where trips come from: `randomTripSource` below
- * synthesizes them; a future `apiTripSource(url)` would `fetch` OD rows into the
- * same shape (see the stub note at the bottom of this file).
+ * synthesizes them; `bikeTripSource` (bikeTrips.ts) samples real Ttareungi OD
+ * pairs from Supabase into the same shape and falls back to the random one.
  */
 
 /** One origin→destination movement. Coordinates are WGS84 [lng, lat]. */
@@ -108,8 +108,3 @@ export function randomTripSource(heightmap: Heightmap, opts: RandomTripOptions =
     next: (count) => Promise.resolve(Array.from({ length: count }, makeTrip)),
   }
 }
-
-// Future: `apiTripSource(url)` — fetch(`${url}?count=${count}`) returning
-// `{ origin: [lng, lat], destination: [lng, lat], durationSec }[]`, mapped onto
-// `Trip`. Nothing in the layer changes; TerrainPanel just receives it as
-// `tripSource` instead of the random one.

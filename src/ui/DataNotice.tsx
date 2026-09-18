@@ -51,7 +51,9 @@ export function DataNotice() {
           — the mountains, the airport, the river margins — are therefore estimates.{' '}
           <strong>Population</strong>, <strong>Businesses</strong> and <strong>Workers</strong>{' '}
           are 2024 counts on Statistics Korea's SGIS 100 m grid, summed per cell with no
-          interpolation.
+          interpolation. The <strong>particles</strong> replay Ttareungi (따릉이) public-bike
+          station-to-station pairs, sampled in proportion to their trip counts and drawn as
+          straight lines at an illustrative speed.
         </p>
         <div className={styles.actions} ref={buttonRef}>
           <Button variant="primary" onClick={dismiss}>

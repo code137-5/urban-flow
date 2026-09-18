@@ -9,7 +9,7 @@ export type ParticleProps = {
   bounds: [number, number, number, number]
   /** 1/spanXMeters, 1/spanYMeters, heightScale (m at h=1), zOffset (m). */
   scale: [number, number, number, number]
-  /** timeScale (playback multiplier on trip durations), unused, unused, dt (s). */
+  /** timeScale (always 1 — TripSchedule bakes it into the durations), unused, unused, dt (s). */
   motion: [number, number, number, number]
   /** progress end (always 1), simulation time (s), unused, fade window (fraction of a trip). */
   lifecycle: [number, number, number, number]

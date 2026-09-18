@@ -4,10 +4,9 @@ import { BufferTransform, Model } from '@luma.gl/engine'
 import type { Buffer, Texture } from '@luma.gl/core'
 import type { Heightmap } from '../data/types'
 import { lngLatToUv, mulberry32 } from '../data/trips'
-import type { Trip, TripSource } from '../data/trips'
 import { computeFlowField } from '../data/flowField'
 import type { FlowField } from '../data/flowField'
-import { TripQueue } from './tripQueue'
+import type { TripSchedule } from './tripSchedule'
 import { particleUniforms } from './particleUniforms'
 import type { ParticleProps as ParticleUniformValues } from './particleUniforms'
 import updateVs from './shaders/particle-update.vs.glsl'
@@ -17,14 +16,15 @@ import fs from './shaders/particle.fs.glsl'
 export type ParticleLayerProps = {
   /** Masked, normalized [0,1] scalar field (−1 = masked-out) — same object the terrain renders. */
   heightmap: Heightmap
-  /** Where trips come from (random now, API later). Change = full rebuild. */
-  tripSource: TripSource
+  /**
+   * Which trip each slot plays, on a clock shared by every layer given the same
+   * schedule — so their particles move in lockstep. Change = full rebuild.
+   */
+  schedule: TripSchedule
   /** Resolved particle slot count (see particleBudget.ts). Change = full buffer rebuild. */
   numParticles?: number
   /** Peak elevation in meters at height 1.0 — MUST match the terrain layer's. */
   heightScale?: number
-  /** Playback multiplier on trip durations: 2 = every trip plays twice as fast. */
-  timeScale?: number
   /** Fade-in/out window at each end of a trip, as a fraction of the trip (0–0.5). */
   fadeFraction?: number
   /** Sprite size in pixels. */
@@ -52,7 +52,6 @@ export type ParticleLayerProps = {
 const defaultProps: DefaultProps<ParticleLayerProps> = {
   numParticles: { type: 'number', value: 1000 },
   heightScale: { type: 'number', value: 4000 },
-  timeScale: { type: 'number', value: 1 },
   fadeFraction: { type: 'number', value: 0.1 },
   pointSize: { type: 'number', value: 3 },
   sizeVariation: { type: 'number', value: 0.5 },
@@ -68,8 +67,8 @@ const defaultProps: DefaultProps<ParticleLayerProps> = {
 
 // Static per-slot attribute layout (floats per particle).
 const TRIP_STRIDE = 4 // originU, originV, destU, destV
-const TIMING_STRIDE = 2 // durationSec, startAt (sim s)
-// Past this many reassignments in one step (e.g. resuming after a long pause),
+const TIMING_STRIDE = 2 // playback seconds, startAt (schedule clock s)
+// Past this many changed slots in one step (e.g. resuming after a long pause),
 // one whole-buffer upload beats per-slot writes.
 const BULK_WRITE_THRESHOLD = 64
 
@@ -86,8 +85,9 @@ const BULK_WRITE_THRESHOLD = 64
  * update program and probe-gated (particleSupport.ts).
  *
  * Because motion is time-deterministic, the CPU knows exactly when each slot's
- * trip ends without reading the GPU back: `_step` scans `endAt`, pulls the next
- * Trip from a prefetching TripQueue, and rewrites just that slot's 24 bytes.
+ * trip ends without reading the GPU back. That bookkeeping lives in a shared
+ * TripSchedule (tripSchedule.ts); `_step` ticks it and rewrites just the 24
+ * bytes of each slot whose trip changed.
  *
  * The layer is self-driving: draw() schedules the next simulation step on a
  * setTimeout throttle, the step runs the transform and calls setNeedsRedraw().
@@ -109,10 +109,9 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     timingBuffer?: Buffer
     tripData?: Float32Array
     timingData?: Float32Array
-    /** Simulation time at which each slot's trip completes. */
-    endAt?: Float64Array
-    queue?: TripQueue
-    /** Guards the async prime() against a teardown racing it. */
+    /** Schedule version each slot was last written from. */
+    seen?: Uint32Array
+    /** Guards the async ensure() against a teardown racing it. */
     setupToken: number
     flowTexture?: Texture
     flowField?: FlowField
@@ -122,7 +121,7 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     stepScheduled: boolean
     timerId?: ReturnType<typeof setTimeout>
     lastStepTime: number
-    /** Accumulated simulation seconds — frozen while `animate` is false. */
+    /** Schedule clock at the last step — frozen while `animate` is false. */
     simTime: number
   }
 
@@ -147,7 +146,7 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     if (
       changeFlags.extensionsChanged ||
       props.numParticles !== oldProps.numParticles ||
-      props.tripSource !== oldProps.tripSource
+      props.schedule !== oldProps.schedule
     ) {
       this._teardown()
       void this._setup()
@@ -156,7 +155,6 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
       // only means a new height/mask texture — no reseeding.
       if (props.heightmap !== oldProps.heightmap) this._rebuildField()
       if (props.trailLength !== oldProps.trailLength) this._rebuildHistory()
-      if (props.timeScale !== oldProps.timeScale) this._recomputeEndTimes()
     }
 
     if (props.animate && this.state.transform) {
@@ -205,39 +203,27 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
   }
 
   /**
-   * Fill every slot from the source, then build the GPU resources. Async only
-   * for the initial prime; nothing is drawn until it resolves (like the panel's
-   * pre-heightmap state). A teardown during the await abandons the setup.
+   * Wait for the schedule to cover our slots, then build the GPU resources.
+   * Async only for that wait; nothing is drawn until it resolves (like the
+   * panel's pre-heightmap state). A teardown during the await abandons the setup.
    */
   private async _setup() {
-    const { heightmap, tripSource } = this.props
+    const { heightmap, schedule } = this.props
     const numParticles = this.props.numParticles!
     const token = ++this.state.setupToken
 
-    const queue = new TripQueue(tripSource)
-    this.state.queue = queue
-    await queue.prime(numParticles)
-    if (token !== this.state.setupToken || this.state.queue !== queue) return
+    await schedule.ensure(numParticles)
+    if (token !== this.state.setupToken) return
 
     const { device } = this.context
-    const rand = mulberry32(0x5e0e1) // fixed seed — reproducible screenshots
-    const toUv = lngLatToUv(heightmap.bounds)
+    const rand = mulberry32(0x5e0e1) // fixed seed — same sprite sizes in every panel
     const tripData = new Float32Array(numParticles * TRIP_STRIDE)
     const timingData = new Float32Array(numParticles * TIMING_STRIDE)
-    const endAt = new Float64Array(numParticles)
+    const seen = new Uint32Array(numParticles) // 0 = never written; _syncSlots fills them
     const seeds = new Float32Array(numParticles * 2)
     const positions = new Float32Array(numParticles * 4)
-    const timeScale = this.props.timeScale!
-    const simTime = this.state.simTime
 
-    let last: Trip | null = null
     for (let p = 0; p < numParticles; p++) {
-      const trip: Trip | null = queue.take() ?? last
-      if (!trip) break // source returned nothing at all — slots stay parked/hidden
-      last = trip
-      // Random head start so the first frame isn't every particle departing at once.
-      const startAt = simTime - rand() * trip.durationSec
-      this._writeSlot(tripData, timingData, endAt, toUv, p, trip, startAt, timeScale)
       seeds[p * 2] = rand()
       seeds[p * 2 + 1] = rand()
       positions[p * 4 + 2] = -1 // hidden until the first transform step lands it
@@ -308,72 +294,54 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     this.state.timingBuffer = timingBuffer
     this.state.tripData = tripData
     this.state.timingData = timingData
-    this.state.endAt = endAt
+    this.state.seen = seen
     this.state.flowTexture = flowTexture
     this.state.flowField = flowField
     this.state.transform = transform
     this.state.model = model
     this.state.current = 0
     this.state.lastStepTime = performance.now() / 1000
+    this._syncSlots()
 
     if (this.props.animate) this._scheduleStep()
     this.setNeedsRedraw()
   }
 
-  /** Pack one trip into slot `p` of the CPU mirrors and record when it ends. */
-  private _writeSlot(
-    tripData: Float32Array,
-    timingData: Float32Array,
-    endAt: Float64Array,
-    toUv: (lng: number, lat: number) => [number, number],
-    p: number,
-    trip: Trip,
-    startAt: number,
-    timeScale: number,
-  ) {
-    const [ou, ov] = toUv(trip.origin[0], trip.origin[1])
-    const [du, dv] = toUv(trip.destination[0], trip.destination[1])
-    const duration = Math.max(trip.durationSec, 1e-3)
-    tripData[p * TRIP_STRIDE] = ou
-    tripData[p * TRIP_STRIDE + 1] = ov
-    tripData[p * TRIP_STRIDE + 2] = du
-    tripData[p * TRIP_STRIDE + 3] = dv
-    timingData[p * TIMING_STRIDE] = duration
-    timingData[p * TIMING_STRIDE + 1] = startAt
-    endAt[p] = startAt + duration / timeScale
-  }
-
   /**
-   * Hand finished slots their next trip. Runs every step; churn is well under
-   * one slot per step at normal rates, so per-slot sub-range writes are the
-   * cheap path. Without a trip ready, the slot replays its current one.
+   * Mirror the schedule into the GPU: rewrite every slot whose trip changed since
+   * we last looked. Churn is well under one slot per step at normal rates, so
+   * per-slot sub-range writes are the cheap path.
    */
-  private _reassignFinished(simTime: number) {
-    const { endAt, tripData, timingData, tripBuffer, timingBuffer, queue } = this.state
-    if (!endAt || !tripData || !timingData || !tripBuffer || !timingBuffer || !queue) return
-    const toUv = lngLatToUv(this.props.heightmap.bounds)
-    const timeScale = this.props.timeScale!
+  private _syncSlots() {
+    const { seen, tripData, timingData, tripBuffer, timingBuffer } = this.state
+    if (!seen || !tripData || !timingData || !tripBuffer || !timingBuffer) return
+    const { schedule, heightmap } = this.props
+    const toUv = lngLatToUv(heightmap.bounds)
 
-    const done: number[] = []
-    for (let p = 0; p < endAt.length; p++) if (endAt[p] <= simTime) done.push(p)
-    if (done.length === 0) return
-
-    for (const p of done) {
-      const trip = queue.take()
-      if (trip) {
-        this._writeSlot(tripData, timingData, endAt, toUv, p, trip, simTime, timeScale)
-      } else {
-        timingData[p * TIMING_STRIDE + 1] = simTime
-        endAt[p] = simTime + timingData[p * TIMING_STRIDE] / timeScale
-      }
+    const changed: number[] = []
+    for (let p = 0; p < seen.length; p++) {
+      const version = schedule.versions[p] ?? 0 // 0 = the source gave nothing; stays hidden
+      if (version === seen[p]) continue
+      seen[p] = version
+      const trip = schedule.trips[p]
+      const [ou, ov] = toUv(trip.origin[0], trip.origin[1])
+      const [du, dv] = toUv(trip.destination[0], trip.destination[1])
+      tripData[p * TRIP_STRIDE] = ou
+      tripData[p * TRIP_STRIDE + 1] = ov
+      tripData[p * TRIP_STRIDE + 2] = du
+      tripData[p * TRIP_STRIDE + 3] = dv
+      timingData[p * TIMING_STRIDE] = schedule.durations[p]
+      timingData[p * TIMING_STRIDE + 1] = schedule.startAt[p]
+      changed.push(p)
     }
+    if (changed.length === 0) return
 
-    if (done.length > BULK_WRITE_THRESHOLD) {
+    if (changed.length > BULK_WRITE_THRESHOLD) {
       tripBuffer.write(tripData)
       timingBuffer.write(timingData)
       return
     }
-    for (const p of done) {
+    for (const p of changed) {
       tripBuffer.write(
         tripData.subarray(p * TRIP_STRIDE, (p + 1) * TRIP_STRIDE),
         p * TRIP_STRIDE * 4,
@@ -382,18 +350,6 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
         timingData.subarray(p * TIMING_STRIDE, (p + 1) * TIMING_STRIDE),
         p * TIMING_STRIDE * 4,
       )
-    }
-  }
-
-  /** timeScale changed: every in-flight trip now ends at a different sim time. */
-  private _recomputeEndTimes() {
-    const { endAt, timingData } = this.state
-    if (!endAt || !timingData) return
-    const timeScale = this.props.timeScale!
-    for (let p = 0; p < endAt.length; p++) {
-      const duration = timingData[p * TIMING_STRIDE]
-      const startAt = timingData[p * TIMING_STRIDE + 1]
-      endAt[p] = startAt + duration / timeScale
     }
   }
 
@@ -453,7 +409,6 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
 
   private _teardown() {
     this.state.setupToken += 1 // abandon any in-flight _setup()
-    this.state.queue?.dispose()
     this.state.transform?.destroy()
     this.state.model?.destroy()
     this.state.buffers?.forEach((b) => b.destroy())
@@ -462,7 +417,6 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     this.state.tripBuffer?.destroy()
     this.state.timingBuffer?.destroy()
     this.state.flowTexture?.destroy()
-    this.state.queue = undefined
     this.state.transform = undefined
     this.state.model = undefined
     this.state.buffers = undefined
@@ -472,7 +426,7 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     this.state.timingBuffer = undefined
     this.state.tripData = undefined
     this.state.timingData = undefined
-    this.state.endAt = undefined
+    this.state.seen = undefined
     this.state.flowTexture = undefined
   }
 
@@ -493,11 +447,11 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     const now = performance.now() / 1000
     const dt = Math.min(Math.max(now - this.state.lastStepTime, 0), 0.05)
     this.state.lastStepTime = now
-    this.state.simTime += dt
 
     // Finished slots get their next trip BEFORE the transform runs, so the new
     // trip's first frame is evaluated this step (progress 0, faded in from there).
-    this._reassignFinished(this.state.simTime)
+    this.state.simTime = this.props.schedule.tick()
+    this._syncSlots()
 
     transform.model.shaderInputs.setProps({ particle: this._uniformValues(dt) })
     transform.run({
@@ -538,7 +492,6 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     const flowField = this.state.flowField!
     const [minLng, minLat, maxLng, maxLat] = heightmap.bounds
     const heightScale = this.props.heightScale!
-    const timeScale = this.props.timeScale!
     const fadeFraction = this.props.fadeFraction!
     const pointSize = this.props.pointSize!
     const sizeVariation = this.props.sizeVariation!
@@ -548,7 +501,8 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     return {
       bounds: [minLng, minLat, maxLng - minLng, maxLat - minLat],
       scale: [1 / flowField.spanXMeters, 1 / flowField.spanYMeters, heightScale, zOffset],
-      motion: [timeScale, 0, 0, dt],
+      // x = timeScale: 1, because the schedule's durations are already playback seconds.
+      motion: [1, 0, 0, dt],
       // Progress runs 0..1; the fade window is a fraction of the trip.
       lifecycle: [1, this.state.simTime, 0, fadeFraction],
       color: [color[0] / 255, color[1] / 255, color[2] / 255, alphaScale],
