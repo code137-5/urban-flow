@@ -48,6 +48,22 @@ const preprocessedSources: DataSource[] = [
     accent: '#0043ce', // IBM Blue 70
     kdeSigmaMeters: 800, // district-scale relief; keeps the Han and the mountains as gaps
   }),
+  staticSource({
+    id: 'companies',
+    label: 'Businesses (사업체)',
+    description: 'Business establishments, 2024 SGIS 100 m grid',
+    unit: 'businesses / 250 m cell',
+    accent: '#002d9c', // IBM Blue 80
+    kdeSigmaMeters: 700, // tighter than population: commercial corridors are narrow
+  }),
+  staticSource({
+    id: 'employees',
+    label: 'Workers (종사자)',
+    description: 'Workers by workplace, 2024 SGIS 100 m grid',
+    unit: 'workers / 250 m cell',
+    accent: '#001d6c', // IBM Blue 90
+    kdeSigmaMeters: 700, // same reach as businesses — the two read side by side
+  }),
 ]
 
 /**

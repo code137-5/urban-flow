@@ -7,10 +7,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Urban Flow** — a data-visualization website about Seoul (서울). Seoul data is rendered as
 **contour-line terrain** (등고선) with **GPU particles flowing over it**, plus an interactive
 **comparison dashboard** that starts with one panel and grows to **up to 6** as the user adds
-datasets (duplicates allowed once all five are shown). Five **real** datasets: Elevation (DEM,
-rasterized from 20 m elevation contour lines) · Temperature (기온) · Noise (소음) · Humidity
-(습도) — 2023 yearly medians from the S-DoT sensor network — · Population (인구, 통계청 SGIS
-2024 100 m grid, summed per 250 m cell). No time-of-day dimension in any of them. The earlier
+datasets (duplicates allowed once all seven are shown). Seven **real** datasets: Elevation
+(DEM, rasterized from 20 m elevation contour lines) · Temperature (기온) · Noise (소음) ·
+Humidity (습도) — 2023 yearly medians from the S-DoT sensor network — · Population (인구) ·
+Businesses (사업체) · Workers (종사자) — 통계청 SGIS 2024 100 m grid counts, summed per 250 m
+cell. No time-of-day dimension in any of them. The earlier
 synthetic datasets (따릉이, 생활이동, 지하철 승하차, 생활인구, floor-area densities) are
 **parked** — hidden from `SOURCES`, adapters and JSONs kept on disk — until real data exists.
 The global particle budget is split across active panels (`src/layers/particleBudget.ts`).
@@ -51,10 +52,11 @@ an API adapter later implements the same `TripSource.next(count)` and is passed 
 *Measured* scalar fields (DEM, S-DoT sensors) must be preprocessed onto a **complete regular
 grid** (`scripts/preprocess/contours.ts`, `scripts/preprocess/sensors.ts`) — the runtime KDE
 is a density sum, so raw sample points would render sensor density, not the measured value.
-*Count* fields (population) are the KDE's native case: cell weight = people, absent cell = 0,
-so they go straight through `aggregateToGrid('sum')` with no fill or padding
-(`scripts/preprocess/populationGrid.ts`). Raw inputs in EPSG:5179 (UTM-K, the usual Korean
-national grid) are reprojected with `scripts/preprocess/proj.ts` (proj4, dev-only).
+*Count* fields (population, businesses, workers) are the KDE's native case: cell weight = count, absent
+cell = 0, so they go straight through `aggregateToGrid('sum')` with no fill or padding. Any
+SGIS 100 m grid drops in via `scripts/preprocess/sgisGrid.ts` (`readSgisGrid(path, valueProp)`
++ a 5-line job under `datasets/`). Raw inputs in EPSG:5179 (UTM-K, the usual Korean national
+grid) are reprojected with `scripts/preprocess/proj.ts` (proj4, dev-only).
 
 - `src/data/types.ts` — `GeoPoint`, `DataSource`, `DatasetId`, `Bounds`. The contract every
   layer depends on. Datasets are source-agnostic weighted geopoints (+ optional `weightByHour`
@@ -84,8 +86,12 @@ implementation source of truth. Rules that are easy to violate:
   - **Exception:** the Hero "Urban Flow" wordmark headline (`src/sections/Hero.module.css`
     `.headline`) is intentionally set to weight **700** — a deliberate departure from the
     display-300 rule for the site's opening statement. It is the only bold display headline.
-- **One accent, IBM Blue.** On dark, links/interactive text use `--link` Blue 40 (`#78a9ff`);
-  the primary button keeps Blue 60 (`#0f62fe`). No second brand color.
+- **One accent, IBM Blue** for the site chrome. On dark, links/interactive text use `--link`
+  Blue 40 (`#78a9ff`); the primary button keeps Blue 60 (`#0f62fe`). No second brand color.
+  - **Exception:** the contour terrain itself is the data encoding, so it carries its own
+    ramp — low `#80fff6` (cyan) → peak `#ff0000` (red), `DEFAULT_CONTROLS` in
+    `src/sections/TerrainPanel.tsx` — and particles are near-white `#f4f4f4` to stay legible
+    on both ends. This is a deliberate user decision (Sept 2026); keep chrome colors out of it.
 - The visualization canvas sits directly on `--bg` `#161616` — one continuous dark surface
   with the site chrome.
 

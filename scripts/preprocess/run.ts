@@ -8,6 +8,8 @@ import { temperatureJob } from './datasets/temperature.ts'
 import { noiseJob } from './datasets/noise.ts'
 import { humidityJob } from './datasets/humidity.ts'
 import { populationJob } from './datasets/population.ts'
+import { companiesJob } from './datasets/companies.ts'
+import { employeesJob } from './datasets/employees.ts'
 
 // Registry of preprocessing jobs. Add a dataset by writing an adapter under
 // datasets/ and appending it here (mirrors src/data/sources/index.ts).
@@ -16,7 +18,15 @@ import { populationJob } from './datasets/population.ts'
 // residentialDensity,commercialDensity}.ts read data/raw/<id>.csv, which only
 // ever existed as generated samples — a no-arg run died on the missing files.
 // Drop the real CSVs into data/raw/ and re-add the import + the job here.
-const JOBS: DatasetJob[] = [demJob, temperatureJob, noiseJob, humidityJob, populationJob]
+const JOBS: DatasetJob[] = [
+  demJob,
+  temperatureJob,
+  noiseJob,
+  humidityJob,
+  populationJob,
+  companiesJob,
+  employeesJob,
+]
 
 /**
  * raw → grid → Seoul clip → public/data/<id>.json, for the selected jobs

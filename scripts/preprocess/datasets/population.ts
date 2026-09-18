@@ -1,5 +1,5 @@
 import type { DatasetJob } from '../job.ts'
-import { readPopulationGrid } from '../populationGrid.ts'
+import { readSgisGrid, sgisGridPath } from '../sgisGrid.ts'
 
 /**
  * 인구 (resident population) — 통계청 SGIS 2024 100 m grid, summed per cell.
@@ -13,5 +13,5 @@ export const populationJob: DatasetJob = {
   id: 'population',
   cellMeters: 250,
   aggregation: 'sum',
-  toCells: () => readPopulationGrid(),
+  toCells: () => readSgisGrid(sgisGridPath('pop'), 'pop_total'),
 }

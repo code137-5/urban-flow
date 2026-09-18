@@ -316,8 +316,8 @@
 /* 2D / 3D view-angle toggle, bottom-left of the canvas (mirrors the zoom
    controls). Carbon content-switcher look: two flat cells sharing one hairline
    border; the active cell inverts to a light fill. */
-/* Bottom-left cluster: the 2D/3D angle toggle and the smoothing (KDE σ) toggle,
-   two segmented groups side by side. */
+/* Bottom-left cluster: the 2D/3D angle toggle and the smoothing (KDE σ) slider,
+   side by side on the same raised surface language. */
 .bottomLeft {
   position: absolute;
   left: var(--space-sm);
@@ -325,6 +325,78 @@
   z-index: 2;
   display: flex;
   gap: var(--space-xs);
+}
+
+/* Smoothing slider: same chrome as the toggles (layer-02 + hairline), a caption
+   glyph on the left and the live σ readout on the right. */
+.smoothing {
+  height: var(--control-height-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 0 var(--space-xs);
+  border: 1px solid var(--border-subtle);
+  background: var(--layer-02);
+  font: var(--type-caption);
+  letter-spacing: 0.32px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.smoothingLabel {
+  color: var(--text-helper);
+}
+
+.smoothingValue {
+  min-width: 4.5ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+/* Carbon-flavored range input: 2px track, 14px square thumb, no radius. */
+.slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 88px;
+  height: var(--control-height-sm);
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.slider::-webkit-slider-runnable-track {
+  height: 2px;
+  background: var(--border-strong);
+}
+
+.slider::-moz-range-track {
+  height: 2px;
+  background: var(--border-strong);
+}
+
+.slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -6px;
+  background: var(--text-primary);
+  border: none;
+  border-radius: 0;
+}
+
+.slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  background: var(--text-primary);
+  border: none;
+  border-radius: 0;
+}
+
+.slider:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
 }
 
 .viewToggle {
