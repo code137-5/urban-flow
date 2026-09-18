@@ -60,7 +60,7 @@ const defaultProps: DefaultProps<ParticleLayerProps> = {
   trail: { type: 'number', value: 0.7 },
   trailLength: { type: 'number', value: 8 },
   trailGap: { type: 'number', value: 6 },
-  color: { type: 'color', value: [255, 136, 128] }, // warm coral — pops against the cool monochrome terrain
+  color: { type: 'color', value: [244, 244, 244] }, // near-white — legible on the cyan→red contour ramp
   zOffset: { type: 'number', value: 15 },
   animate: true,
   maxFps: { type: 'number', value: 30 },

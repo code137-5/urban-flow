@@ -140,10 +140,14 @@ const DEFAULT_CONTROLS: Controls = {
   // Contour half-width in interval units (bold poster line, tuned by the user);
   // the shader keeps thickness slope-invariant, this scales it overall.
   lineWidth: 0.05,
-  // Saturated summit plateau (마루) opacity — 0 removes the filled cap.
-  capOpacity: 0.2,
-  lineColor: '#393939', // low elevation — dark hairline gray
-  peakColor: '#c6c6c6', // high elevation — light gray
+  // Saturated summit plateau (마루) opacity — 0 removes the filled cap. Kept low
+  // now that the peak is pure red: a wide plateau (population) fills solid otherwise.
+  capOpacity: 0.1,
+  // Contour ramp: cold cyan lowlands → hot red peaks. A deliberate departure from
+  // the gray-only terrain (see CLAUDE.md design notes) — the ramp IS the data
+  // encoding, so it gets to carry color.
+  lineColor: '#80fff6', // low — cyan
+  peakColor: '#ff0000', // high — red
   contourOpacity: 1,
   boundaryColor: '#525252',
   boundaryOpacity: 0.67,
@@ -163,7 +167,7 @@ const DEFAULT_CONTROLS: Controls = {
   particleTrail: 0.7, // ghost-afterimage strength (0 = off)
   particleTrailLength: 8, // ghost snapshots in the trail
   particleTrailGap: 6, // sim steps between snapshots (spacing)
-  particleColor: '#ff8880', // warm coral — pops against the cool monochrome terrain
+  particleColor: '#f4f4f4', // near-white — stays legible on both the cyan and the red end of the ramp
   particleOpacity: 0.85,
 }
 
