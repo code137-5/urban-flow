@@ -7,22 +7,23 @@ import { demJob } from './datasets/dem.ts'
 import { temperatureJob } from './datasets/temperature.ts'
 import { noiseJob } from './datasets/noise.ts'
 import { humidityJob } from './datasets/humidity.ts'
+import { populationJob } from './datasets/population.ts'
 
 // Registry of preprocessing jobs. Add a dataset by writing an adapter under
 // datasets/ and appending it here (mirrors src/data/sources/index.ts).
 //
-// Parked, not deleted: datasets/{saenghwalIngu,juminIngu,buildingDensity,
+// Parked, not deleted: datasets/{saenghwalIngu,buildingDensity,
 // residentialDensity,commercialDensity}.ts read data/raw/<id>.csv, which only
 // ever existed as generated samples — a no-arg run died on the missing files.
 // Drop the real CSVs into data/raw/ and re-add the import + the job here.
-const JOBS: DatasetJob[] = [demJob, temperatureJob, noiseJob, humidityJob]
+const JOBS: DatasetJob[] = [demJob, temperatureJob, noiseJob, humidityJob, populationJob]
 
 /**
  * raw → grid → Seoul clip → public/data/<id>.json, for the selected jobs
  * (all of them when no ids are given).
  *
  *   npm run preprocess                 # every dataset
- *   npm run preprocess dem jumin-ingu  # a subset
+ *   npm run preprocess dem population  # a subset
  */
 function run(ids: string[]): void {
   const unknown = ids.filter((id) => !JOBS.some((j) => j.id === id))

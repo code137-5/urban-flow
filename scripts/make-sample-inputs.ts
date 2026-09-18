@@ -102,14 +102,6 @@ const SPECS: SampleSpec[] = [
     cores: scaled(CBD_CORES, 9000),
     hourly: { nightPeak: 5000, nightBase: 300 },
   },
-  // 주민등록인구 — broad residential belts, static.
-  {
-    id: 'jumin-ingu',
-    seed: 0x71_2c,
-    base: 500,
-    noise: 0.12,
-    cores: scaled(RESIDENTIAL_CORES, 6000),
-  },
   // 건축연면적 밀도 — built-up everywhere, peaks at cores.
   {
     id: 'building-density',

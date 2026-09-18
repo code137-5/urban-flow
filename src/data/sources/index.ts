@@ -40,13 +40,21 @@ const preprocessedSources: DataSource[] = [
     accent: '#a6c8ff', // IBM Blue 30
     kdeSigmaMeters: 1000, // readings are coarsely quantized, so they need extra smoothing
   }),
+  staticSource({
+    id: 'population',
+    label: 'Population (인구)',
+    description: 'Resident population, 2024 SGIS 100 m grid',
+    unit: 'people / 250 m cell',
+    accent: '#0043ce', // IBM Blue 70
+    kdeSigmaMeters: 800, // district-scale relief; keeps the Han and the mountains as gaps
+  }),
 ]
 
 /**
  * Parked: synthetic placeholder datasets, kept out of the registry until real
  * data exists. Their adapters (`ttareungi`, `saenghwalIdong`, `subway`) and
  * public/data JSONs stay on disk, and their ids stay in `DatasetId`:
- *   ttareungi · saenghwal-idong · subway · saenghwal-ingu · jumin-ingu ·
+ *   ttareungi · saenghwal-idong · subway · saenghwal-ingu ·
  *   building-density · residential-density · commercial-density
  * To bring one back: re-import its adapter (or re-add its `staticSource({...})`
  * entry above) and list it in `SOURCES`.

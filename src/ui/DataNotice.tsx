@@ -3,9 +3,10 @@ import { Button } from './Button'
 import styles from './DataNotice.module.css'
 
 /**
- * Load-time data-source notice: where the four dashboard datasets come from —
- * Seoul's elevation contour lines, and 2023 yearly medians from the S-DoT
- * sensor network interpolated between sensors. Shown on EVERY page load /
+ * Load-time data-source notice: where the five dashboard datasets come from —
+ * Seoul's elevation contour lines, 2023 yearly medians from the S-DoT sensor
+ * network interpolated between sensors, and the SGIS 2024 100 m population grid.
+ * Shown on EVERY page load /
  * new window (no dismissal persistence — per product decision).
  * Carbon Gray 100 dialog — flat 0px corners, hairline border, no shadow.
  */
@@ -46,7 +47,9 @@ export function DataNotice() {
           lines. <strong>Temperature</strong>, <strong>Noise</strong> and{' '}
           <strong>Humidity</strong> are 2023 yearly medians from the S-DoT city sensor
           network, interpolated between roughly 800–900 sensors. Values far from any sensor
-          — the mountains, the airport, the river margins — are therefore estimates.
+          — the mountains, the airport, the river margins — are therefore estimates.{' '}
+          <strong>Population</strong> is the 2024 resident headcount on Statistics Korea's
+          SGIS 100 m grid, summed per cell with no interpolation.
         </p>
         <div className={styles.actions} ref={buttonRef}>
           <Button variant="primary" onClick={dismiss}>

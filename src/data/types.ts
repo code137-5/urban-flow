@@ -29,13 +29,13 @@ export type DatasetId =
   | 'temperature'
   | 'noise'
   | 'humidity'
+  | 'population'
   // Parked: synthetic placeholders. Adapters and JSONs stay on disk, but these are
   // not registered in src/data/sources/index.ts until real data replaces them.
   | 'ttareungi'
   | 'saenghwal-idong'
   | 'subway'
   | 'saenghwal-ingu'
-  | 'jumin-ingu'
   | 'building-density'
   | 'residential-density'
   | 'commercial-density'

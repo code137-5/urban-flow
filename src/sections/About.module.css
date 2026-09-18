@@ -68,11 +68,11 @@
   margin-top: var(--space-xxl);
 }
 
-/* Four datasets: 4-across at desktop so no card is orphaned on a second row.
-   The 673–1056px query below folds it to a clean 2×2. */
+/* Five datasets: 5-across at desktop so no card is orphaned on a second row.
+   The 673–1056px query below folds it to 2 columns (last card spans alone). */
 .cardGrid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: var(--grid-gutter);
 }
 
@@ -85,6 +85,8 @@
 .cardTitle {
   font: var(--type-card-title);
   color: var(--text-primary);
+  /* Five columns are narrow: keep "(기온)" whole instead of breaking mid-word. */
+  word-break: keep-all;
 }
 
 .cardBody {
