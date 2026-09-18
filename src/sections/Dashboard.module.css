@@ -316,11 +316,18 @@
 /* 2D / 3D view-angle toggle, bottom-left of the canvas (mirrors the zoom
    controls). Carbon content-switcher look: two flat cells sharing one hairline
    border; the active cell inverts to a light fill. */
-.viewToggle {
+/* Bottom-left cluster: the 2D/3D angle toggle and the smoothing (KDE σ) toggle,
+   two segmented groups side by side. */
+.bottomLeft {
   position: absolute;
   left: var(--space-sm);
   bottom: var(--space-sm);
   z-index: 2;
+  display: flex;
+  gap: var(--space-xs);
+}
+
+.viewToggle {
   display: flex;
   border: 1px solid var(--border-subtle);
   background: var(--layer-02);
