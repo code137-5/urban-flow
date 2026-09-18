@@ -57,18 +57,21 @@ const clampCenter = (lng: number, lat: number): [number, number] => [
 ]
 
 /**
- * User-facing KDE smoothing steps. Each multiplies the dataset's base σ
- * (`meta.kdeSigmaMeters`, or the tuner's knob) — users shouldn't have to think in
- * meters, and every dataset has its own sensible base. 'normal' is the tuned
- * default; 'sharp' pulls out local detail (one apartment complex, one road
- * corridor), 'smooth' reads the city at district scale.
+ * User-facing KDE smoothing slider. It scales the dataset's base σ
+ * (`meta.kdeSigmaMeters`, or the tuner's knob) by a factor in
+ * [SIGMA_FACTOR_MIN, SIGMA_FACTOR_MAX] on a log scale, so the midpoint is the
+ * tuned default and users never think in meters (every dataset has its own
+ * base). Recomputing the heightmap is O(points × window²) on the main thread —
+ * up to ~1 s for the DEM at large σ — so the slider only commits after
+ * SIGMA_COMMIT_MS of no movement, not on every drag event.
  */
-type Smoothing = 'sharp' | 'normal' | 'smooth'
-const SMOOTHING_STEPS: { id: Smoothing; label: string; factor: number }[] = [
-  { id: 'sharp', label: 'Sharp', factor: 0.6 },
-  { id: 'normal', label: 'Normal', factor: 1 },
-  { id: 'smooth', label: 'Smooth', factor: 1.6 },
-]
+const SIGMA_FACTOR_MIN = 0.4
+const SIGMA_FACTOR_MAX = 2.5
+const SIGMA_COMMIT_MS = 150
+/** Slider position 0–1 → σ factor (log scale, 0.5 → ×1). */
+const sigmaFactorAt = (t: number) =>
+  SIGMA_FACTOR_MIN * (SIGMA_FACTOR_MAX / SIGMA_FACTOR_MIN) ** t
+const SIGMA_SLIDER_DEFAULT = 0.5
 
 // Eased transitions: +/- buttons animate zoom; the 2D/3D toggle animates tilt.
 const zoomInterpolator = new LinearInterpolator(['zoom'])
@@ -250,9 +253,15 @@ export function TerrainPanel({
   // Set when source.load() rejects (e.g. a preprocessed static file is missing).
   const [loadError, setLoadError] = useState<string | null>(null)
   const [controls, setControls] = useState<Controls>(DEFAULT_CONTROLS)
-  // Per-panel KDE smoothing step (Sharp / Normal / Smooth) — the one field knob
-  // exposed without ?tune.
-  const [smoothing, setSmoothing] = useState<Smoothing>('normal')
+  // Per-panel KDE smoothing — the one field knob exposed without ?tune.
+  // `sigmaSlider` tracks the thumb live (display only); `sigmaFactor` is the
+  // committed value that actually drives the heightmap, debounced below.
+  const [sigmaSlider, setSigmaSlider] = useState(SIGMA_SLIDER_DEFAULT)
+  const [sigmaFactor, setSigmaFactor] = useState(1)
+  useEffect(() => {
+    const id = setTimeout(() => setSigmaFactor(sigmaFactorAt(sigmaSlider)), SIGMA_COMMIT_MS)
+    return () => clearTimeout(id)
+  }, [sigmaSlider])
   // If deck.gl can't initialize/compile on this device (some mobile GPUs), fall
   // back to a zero-WebGL SVG contour so the panel is never blank.
   const [webglFailed, setWebglFailed] = useState(false)
@@ -397,13 +406,15 @@ export function TerrainPanel({
   // Deferred a frame so the loading label paints before the main thread blocks.
   // While the σ knob is untouched (still at the global default) the dataset's
   // own default applies; once the user moves it in ?tune, the knob wins. The
-  // panel's Sharp/Normal/Smooth toggle then scales whichever base is in effect.
+  // panel's smoothing slider then scales whichever base is in effect.
   const datasetSigma = source.meta.kdeSigmaMeters
   const baseSigma =
     controls.sigma === DEFAULT_CONTROLS.sigma && datasetSigma !== undefined
       ? datasetSigma
       : controls.sigma
-  const sigma = baseSigma * (SMOOTHING_STEPS.find((s) => s.id === smoothing)?.factor ?? 1)
+  const sigma = baseSigma * sigmaFactor
+  // What the slider shows while dragging — the value about to be committed.
+  const sigmaPreview = Math.round(baseSigma * sigmaFactorAt(sigmaSlider))
   useEffect(() => {
     if (!points) return
     let alive = true
@@ -609,20 +620,22 @@ export function TerrainPanel({
                 3D
               </button>
             </div>
-            <div className={styles.viewToggle} role="group" aria-label="Smoothing">
-              {SMOOTHING_STEPS.map((step) => (
-                <button
-                  key={step.id}
-                  type="button"
-                  className={`${styles.viewBtn} ${smoothing === step.id ? styles.viewBtnActive : ''}`}
-                  aria-pressed={smoothing === step.id}
-                  title={`Smoothing · σ ${Math.round(baseSigma * step.factor)} m`}
-                  onClick={() => setSmoothing(step.id)}
-                >
-                  {step.label}
-                </button>
-              ))}
-            </div>
+            <label className={styles.smoothing} title="Smoothing · KDE bandwidth">
+              <span className={styles.smoothingLabel}>σ</span>
+              <input
+                type="range"
+                className={styles.slider}
+                min={0}
+                max={1}
+                step={0.01}
+                value={sigmaSlider}
+                aria-label="Smoothing"
+                aria-valuetext={`${sigmaPreview} m`}
+                onChange={(e) => setSigmaSlider(Number(e.target.value))}
+                onDoubleClick={() => setSigmaSlider(SIGMA_SLIDER_DEFAULT)}
+              />
+              <span className={styles.smoothingValue}>{sigmaPreview} m</span>
+            </label>
           </div>
           <div className={styles.zoomControls}>
             <button
