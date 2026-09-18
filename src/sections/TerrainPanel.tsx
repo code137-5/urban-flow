@@ -56,6 +56,20 @@ const clampCenter = (lng: number, lat: number): [number, number] => [
   clamp(lat, BOUND_MIN_LAT, BOUND_MAX_LAT),
 ]
 
+/**
+ * User-facing KDE smoothing steps. Each multiplies the dataset's base σ
+ * (`meta.kdeSigmaMeters`, or the tuner's knob) — users shouldn't have to think in
+ * meters, and every dataset has its own sensible base. 'normal' is the tuned
+ * default; 'sharp' pulls out local detail (one apartment complex, one road
+ * corridor), 'smooth' reads the city at district scale.
+ */
+type Smoothing = 'sharp' | 'normal' | 'smooth'
+const SMOOTHING_STEPS: { id: Smoothing; label: string; factor: number }[] = [
+  { id: 'sharp', label: 'Sharp', factor: 0.6 },
+  { id: 'normal', label: 'Normal', factor: 1 },
+  { id: 'smooth', label: 'Smooth', factor: 1.6 },
+]
+
 // Eased transitions: +/- buttons animate zoom; the 2D/3D toggle animates tilt.
 const zoomInterpolator = new LinearInterpolator(['zoom'])
 const pitchInterpolator = new LinearInterpolator(['pitch'])
@@ -236,6 +250,9 @@ export function TerrainPanel({
   // Set when source.load() rejects (e.g. a preprocessed static file is missing).
   const [loadError, setLoadError] = useState<string | null>(null)
   const [controls, setControls] = useState<Controls>(DEFAULT_CONTROLS)
+  // Per-panel KDE smoothing step (Sharp / Normal / Smooth) — the one field knob
+  // exposed without ?tune.
+  const [smoothing, setSmoothing] = useState<Smoothing>('normal')
   // If deck.gl can't initialize/compile on this device (some mobile GPUs), fall
   // back to a zero-WebGL SVG contour so the panel is never blank.
   const [webglFailed, setWebglFailed] = useState(false)
@@ -379,12 +396,14 @@ export function TerrainPanel({
   // color/count tweaks (also in `controls`) must not re-run the expensive KDE.
   // Deferred a frame so the loading label paints before the main thread blocks.
   // While the σ knob is untouched (still at the global default) the dataset's
-  // own default applies; once the user moves it in ?tune, the knob wins.
+  // own default applies; once the user moves it in ?tune, the knob wins. The
+  // panel's Sharp/Normal/Smooth toggle then scales whichever base is in effect.
   const datasetSigma = source.meta.kdeSigmaMeters
-  const sigma =
+  const baseSigma =
     controls.sigma === DEFAULT_CONTROLS.sigma && datasetSigma !== undefined
       ? datasetSigma
       : controls.sigma
+  const sigma = baseSigma * (SMOOTHING_STEPS.find((s) => s.id === smoothing)?.factor ?? 1)
   useEffect(() => {
     if (!points) return
     let alive = true
@@ -571,23 +590,39 @@ export function TerrainPanel({
       />
       {heightmap && (
         <>
-          <div className={styles.viewToggle} role="group" aria-label="View angle">
-            <button
-              type="button"
-              className={`${styles.viewBtn} ${!is3d ? styles.viewBtnActive : ''}`}
-              aria-pressed={!is3d}
-              onClick={() => setThreeD(false)}
-            >
-              2D
-            </button>
-            <button
-              type="button"
-              className={`${styles.viewBtn} ${is3d ? styles.viewBtnActive : ''}`}
-              aria-pressed={is3d}
-              onClick={() => setThreeD(true)}
-            >
-              3D
-            </button>
+          <div className={styles.bottomLeft}>
+            <div className={styles.viewToggle} role="group" aria-label="View angle">
+              <button
+                type="button"
+                className={`${styles.viewBtn} ${!is3d ? styles.viewBtnActive : ''}`}
+                aria-pressed={!is3d}
+                onClick={() => setThreeD(false)}
+              >
+                2D
+              </button>
+              <button
+                type="button"
+                className={`${styles.viewBtn} ${is3d ? styles.viewBtnActive : ''}`}
+                aria-pressed={is3d}
+                onClick={() => setThreeD(true)}
+              >
+                3D
+              </button>
+            </div>
+            <div className={styles.viewToggle} role="group" aria-label="Smoothing">
+              {SMOOTHING_STEPS.map((step) => (
+                <button
+                  key={step.id}
+                  type="button"
+                  className={`${styles.viewBtn} ${smoothing === step.id ? styles.viewBtnActive : ''}`}
+                  aria-pressed={smoothing === step.id}
+                  title={`Smoothing · σ ${Math.round(baseSigma * step.factor)} m`}
+                  onClick={() => setSmoothing(step.id)}
+                >
+                  {step.label}
+                </button>
+              ))}
+            </div>
           </div>
           <div className={styles.zoomControls}>
             <button

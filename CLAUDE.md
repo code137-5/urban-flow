@@ -7,13 +7,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Urban Flow** — a data-visualization website about Seoul (서울). Seoul data is rendered as
 **contour-line terrain** (등고선) with **GPU particles flowing over it**, plus an interactive
 **comparison dashboard** that starts with one panel and grows to **up to 6** as the user adds
-datasets (duplicates allowed once all four are shown). Four **real** datasets: Elevation (DEM,
+datasets (duplicates allowed once all five are shown). Five **real** datasets: Elevation (DEM,
 rasterized from 20 m elevation contour lines) · Temperature (기온) · Noise (소음) · Humidity
-(습도) — the last three are 2023 yearly medians from the S-DoT sensor network. No time-of-day
-dimension in any of them. The earlier synthetic datasets (따릉이, 생활이동, 지하철 승하차,
-population, floor-area densities) are **parked** — hidden from `SOURCES`, adapters and JSONs
-kept on disk — until real data exists. The global particle budget is split across active
-panels (`src/layers/particleBudget.ts`).
+(습도) — 2023 yearly medians from the S-DoT sensor network — · Population (인구, 통계청 SGIS
+2024 100 m grid, summed per 250 m cell). No time-of-day dimension in any of them. The earlier
+synthetic datasets (따릉이, 생활이동, 지하철 승하차, 생활인구, floor-area densities) are
+**parked** — hidden from `SOURCES`, adapters and JSONs kept on disk — until real data exists.
+The global particle budget is split across active panels (`src/layers/particleBudget.ts`).
 
 Architecture is based on the experimental repo `Aete/seoul-terrain-animation` (referenced,
 not forked — its data/heightmap/contour pipeline and shaders are the template; its particle
@@ -48,9 +48,13 @@ an API adapter later implements the same `TripSource.next(count)` and is passed 
 `Dashboard`/`TerrainPanel` as `tripSource`. The CPU predicts each trip's end from
 `startAt + duration / timeScale` — no GPU readback — and rewrites only that slot.
 
-Scalar-field datasets (DEM, S-DoT sensors) must be preprocessed onto a **complete regular
+*Measured* scalar fields (DEM, S-DoT sensors) must be preprocessed onto a **complete regular
 grid** (`scripts/preprocess/contours.ts`, `scripts/preprocess/sensors.ts`) — the runtime KDE
 is a density sum, so raw sample points would render sensor density, not the measured value.
+*Count* fields (population) are the KDE's native case: cell weight = people, absent cell = 0,
+so they go straight through `aggregateToGrid('sum')` with no fill or padding
+(`scripts/preprocess/populationGrid.ts`). Raw inputs in EPSG:5179 (UTM-K, the usual Korean
+national grid) are reprojected with `scripts/preprocess/proj.ts` (proj4, dev-only).
 
 - `src/data/types.ts` — `GeoPoint`, `DataSource`, `DatasetId`, `Bounds`. The contract every
   layer depends on. Datasets are source-agnostic weighted geopoints (+ optional `weightByHour`

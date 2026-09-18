@@ -52,9 +52,14 @@ const DATASETS: Dataset[] = [
     body: 'Relative humidity as 2023 yearly medians from the same sensor network, tracing where the city’s air stays damp and where it runs dry.',
     unit: 'Unit · %RH',
   },
+  {
+    title: 'Population (인구)',
+    body: 'Where Seoul actually lives: 2024 resident population from Statistics Korea’s SGIS 100 m grid, summed per 250 m cell — apartment belts rise as ridges, mountains and the river fall away.',
+    unit: 'Unit · people',
+  },
 ]
 
-/** Project explanation section — concept, pipeline, and the four datasets. */
+/** Project explanation section — concept, pipeline, and the five datasets. */
 export function About() {
   return (
     <Section id="about" divided>
@@ -86,7 +91,7 @@ export function About() {
         </div>
 
         <div className={styles.datasets}>
-          <h3 className={styles.subhead}>Four datasets</h3>
+          <h3 className={styles.subhead}>Five datasets</h3>
           <div className={styles.cardGrid}>
             {DATASETS.map((dataset) => (
               <article key={dataset.title} className={styles.card}>
