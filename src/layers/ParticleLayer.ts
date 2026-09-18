@@ -3,8 +3,11 @@ import type { DefaultProps, LayerContext, UpdateParameters } from '@deck.gl/core
 import { BufferTransform, Model } from '@luma.gl/engine'
 import type { Buffer, Texture } from '@luma.gl/core'
 import type { Heightmap } from '../data/types'
+import { lngLatToUv, mulberry32 } from '../data/trips'
+import type { Trip, TripSource } from '../data/trips'
 import { computeFlowField } from '../data/flowField'
 import type { FlowField } from '../data/flowField'
+import { TripQueue } from './tripQueue'
 import { particleUniforms } from './particleUniforms'
 import type { ParticleProps as ParticleUniformValues } from './particleUniforms'
 import updateVs from './shaders/particle-update.vs.glsl'
@@ -14,20 +17,16 @@ import fs from './shaders/particle.fs.glsl'
 export type ParticleLayerProps = {
   /** Masked, normalized [0,1] scalar field (−1 = masked-out) — same object the terrain renders. */
   heightmap: Heightmap
-  /** Resolved particle count (see particleBudget.ts). Change = full buffer rebuild. */
+  /** Where trips come from (random now, API later). Change = full rebuild. */
+  tripSource: TripSource
+  /** Resolved particle slot count (see particleBudget.ts). Change = full buffer rebuild. */
   numParticles?: number
   /** Peak elevation in meters at height 1.0 — MUST match the terrain layer's. */
   heightScale?: number
-  /** Advection speed in m/s at |gradient| = 1 (poster-scale, not physical). */
-  speed?: number
-  /** Per-frame direction jitter, 0–1. */
-  jitter?: number
-  /** 0 = flow along contour lines (isoline tangent), 1 = straight uphill. */
-  flowBlend?: number
-  /** Particle lifetime in simulation frames. */
-  maxAge?: number
-  /** Fade-in/out window at spawn/expiry, in frames. */
-  fadeFrames?: number
+  /** Playback multiplier on trip durations: 2 = every trip plays twice as fast. */
+  timeScale?: number
+  /** Fade-in/out window at each end of a trip, as a fraction of the trip (0–0.5). */
+  fadeFraction?: number
   /** Sprite size in pixels. */
   pointSize?: number
   /** Per-particle size variation, 0–1. */
@@ -53,11 +52,8 @@ export type ParticleLayerProps = {
 const defaultProps: DefaultProps<ParticleLayerProps> = {
   numParticles: { type: 'number', value: 1000 },
   heightScale: { type: 'number', value: 4000 },
-  speed: { type: 'number', value: 700 },
-  jitter: { type: 'number', value: 0 },
-  flowBlend: { type: 'number', value: 0 },
-  maxAge: { type: 'number', value: 800 },
-  fadeFrames: { type: 'number', value: 30 },
+  timeScale: { type: 'number', value: 1 },
+  fadeFraction: { type: 'number', value: 0.1 },
   pointSize: { type: 'number', value: 3 },
   sizeVariation: { type: 'number', value: 0.5 },
   glow: { type: 'number', value: 0.6 },
@@ -70,60 +66,28 @@ const defaultProps: DefaultProps<ParticleLayerProps> = {
   maxFps: { type: 'number', value: 30 },
 }
 
-/** Deterministic RNG — reproducible spawns make Playwright screenshots comparable. */
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0
-  return () => {
-    a = (a + 0x6d2b79f5) | 0
-    let t = Math.imul(a ^ (a >>> 15), 1 | a)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
-
-/** Initial particle state: rejection-sampled in-mask positions, randomized ages. */
-function seedParticles(
-  heightmap: Heightmap,
-  count: number,
-  maxAge: number,
-): { positions: Float32Array; seeds: Float32Array } {
-  const { data, width: W, height: H } = heightmap
-  const rand = mulberry32(0x5e0e1) // fixed seed — "Seoul"-ish, arbitrary
-  const positions = new Float32Array(count * 4)
-  const seeds = new Float32Array(count * 2)
-  for (let p = 0; p < count; p++) {
-    let i = 0
-    let j = 0
-    let k = 0
-    let tries = 0
-    do {
-      i = Math.floor(rand() * W)
-      j = Math.floor(rand() * H)
-      k = j * W + i
-    } while (data[k] < 0 && ++tries < 100)
-    const masked = data[k] < 0
-    positions[p * 4] = (i + rand()) / W
-    positions[p * 4 + 1] = (j + rand()) / H
-    positions[p * 4 + 2] = masked ? -1 : data[k]
-    // Randomized starting age — staggers respawns from the very first frame.
-    positions[p * 4 + 3] = rand() * maxAge
-    seeds[p * 2] = rand()
-    seeds[p * 2 + 1] = rand()
-  }
-  return { positions, seeds }
-}
+// Static per-slot attribute layout (floats per particle).
+const TRIP_STRIDE = 4 // originU, originV, destU, destV
+const TIMING_STRIDE = 2 // durationSec, startAt (sim s)
+// Past this many reassignments in one step (e.g. resuming after a long pause),
+// one whole-buffer upload beats per-slot writes.
+const BULK_WRITE_THRESHOLD = 64
 
 /**
- * GPU particles advected over the contour terrain.
+ * GPU particles playing trips (origin → destination in `durationSec`) over the
+ * contour terrain.
  *
- * Simulation state (UV position, terrain height, age) lives in two ping-pong
- * vertex BUFFERS updated by a luma.gl BufferTransform (transform feedback) —
- * never in a texture — so the render stage does zero texture fetches, matching
- * the terrain's "bake, don't fetch" mobile constraint. The flow field (heightmap
- * gradient) is the single vertex-stage texture read, confined to the update
- * program and probe-gated (particleSupport.ts). Respawn/lifecycle ideas adapted
- * from code137-5/glsl_particle_animation; buffer transport from the WeatherLayers
- * deck.gl-particle architecture.
+ * Each particle is a *slot* holding one Trip. Position is a pure function of
+ * simulation time (`mix(origin, dest, (t - startAt) / duration)`), evaluated by
+ * a luma.gl BufferTransform (transform feedback) into a ping-pong vertex BUFFER
+ * — never a texture — so the render stage does zero texture fetches (the same
+ * "bake, don't fetch" mobile constraint the terrain honors). The one
+ * vertex-stage texture read (terrain height + Seoul mask) is confined to the
+ * update program and probe-gated (particleSupport.ts).
+ *
+ * Because motion is time-deterministic, the CPU knows exactly when each slot's
+ * trip ends without reading the GPU back: `_step` scans `endAt`, pulls the next
+ * Trip from a prefetching TripQueue, and rewrites just that slot's 24 bytes.
  *
  * The layer is self-driving: draw() schedules the next simulation step on a
  * setTimeout throttle, the step runs the transform and calls setNeedsRedraw().
@@ -140,6 +104,16 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     historyHead: number
     stepCount: number
     seedBuffer?: Buffer
+    /** Static per-slot trip endpoints (UV) and timing; CPU mirrors below. */
+    tripBuffer?: Buffer
+    timingBuffer?: Buffer
+    tripData?: Float32Array
+    timingData?: Float32Array
+    /** Simulation time at which each slot's trip completes. */
+    endAt?: Float64Array
+    queue?: TripQueue
+    /** Guards the async prime() against a teardown racing it. */
+    setupToken: number
     flowTexture?: Texture
     flowField?: FlowField
     transform?: BufferTransform
@@ -148,6 +122,8 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     stepScheduled: boolean
     timerId?: ReturnType<typeof setTimeout>
     lastStepTime: number
+    /** Accumulated simulation seconds — frozen while `animate` is false. */
+    simTime: number
   }
 
   getShaders() {
@@ -160,20 +136,27 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     this.state.lastStepTime = 0
     this.state.historyHead = 0
     this.state.stepCount = 0
+    this.state.setupToken = 0
+    this.state.simTime = 0
   }
 
   updateState(params: UpdateParameters<this>) {
     super.updateState(params)
     const { props, oldProps, changeFlags } = params
 
-    if (changeFlags.extensionsChanged || props.numParticles !== oldProps.numParticles) {
+    if (
+      changeFlags.extensionsChanged ||
+      props.numParticles !== oldProps.numParticles ||
+      props.tripSource !== oldProps.tripSource
+    ) {
       this._teardown()
-      this._setup()
-    } else if (props.heightmap !== oldProps.heightmap) {
-      // Same particle count: rebuild the field + re-seed state in place.
-      this._rebuildField()
-    } else if (props.trailLength !== oldProps.trailLength) {
-      this._rebuildHistory()
+      void this._setup()
+    } else {
+      // Trips are lng/lat-based and the bounds are fixed, so a new heightmap
+      // only means a new height/mask texture — no reseeding.
+      if (props.heightmap !== oldProps.heightmap) this._rebuildField()
+      if (props.trailLength !== oldProps.trailLength) this._rebuildHistory()
+      if (props.timeScale !== oldProps.timeScale) this._recomputeEndTimes()
     }
 
     if (props.animate && this.state.transform) {
@@ -221,15 +204,46 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     super.finalizeState(context)
   }
 
-  private _setup() {
-    const { device } = this.context
-    const { heightmap } = this.props
+  /**
+   * Fill every slot from the source, then build the GPU resources. Async only
+   * for the initial prime; nothing is drawn until it resolves (like the panel's
+   * pre-heightmap state). A teardown during the await abandons the setup.
+   */
+  private async _setup() {
+    const { heightmap, tripSource } = this.props
     const numParticles = this.props.numParticles!
-    const maxAge = this.props.maxAge!
+    const token = ++this.state.setupToken
+
+    const queue = new TripQueue(tripSource)
+    this.state.queue = queue
+    await queue.prime(numParticles)
+    if (token !== this.state.setupToken || this.state.queue !== queue) return
+
+    const { device } = this.context
+    const rand = mulberry32(0x5e0e1) // fixed seed — reproducible screenshots
+    const toUv = lngLatToUv(heightmap.bounds)
+    const tripData = new Float32Array(numParticles * TRIP_STRIDE)
+    const timingData = new Float32Array(numParticles * TIMING_STRIDE)
+    const endAt = new Float64Array(numParticles)
+    const seeds = new Float32Array(numParticles * 2)
+    const positions = new Float32Array(numParticles * 4)
+    const timeScale = this.props.timeScale!
+    const simTime = this.state.simTime
+
+    let last: Trip | null = null
+    for (let p = 0; p < numParticles; p++) {
+      const trip: Trip | null = queue.take() ?? last
+      if (!trip) break // source returned nothing at all — slots stay parked/hidden
+      last = trip
+      // Random head start so the first frame isn't every particle departing at once.
+      const startAt = simTime - rand() * trip.durationSec
+      this._writeSlot(tripData, timingData, endAt, toUv, p, trip, startAt, timeScale)
+      seeds[p * 2] = rand()
+      seeds[p * 2 + 1] = rand()
+      positions[p * 4 + 2] = -1 // hidden until the first transform step lands it
+    }
 
     const flowField = computeFlowField(heightmap)
-    const { positions, seeds } = seedParticles(heightmap, numParticles, maxAge)
-
     const buffers: [Buffer, Buffer] = [
       device.createBuffer({ data: positions }),
       device.createBuffer({ data: positions.slice() }),
@@ -241,6 +255,8 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
       device.createBuffer({ data: positions.slice() }),
     )
     const seedBuffer = device.createBuffer({ data: seeds })
+    const tripBuffer = device.createBuffer({ data: tripData })
+    const timingBuffer = device.createBuffer({ data: timingData })
     const flowTexture = this._createFlowTexture(flowField)
 
     const transform = new BufferTransform(device, {
@@ -250,12 +266,12 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
       topology: 'point-list',
       vertexCount: numParticles,
       bufferLayout: [
-        { name: 'inPosition', format: 'float32x4' },
-        { name: 'inSeed', format: 'float32x2' },
+        { name: 'inTrip', format: 'float32x4' },
+        { name: 'inTiming', format: 'float32x2' },
       ],
       outputs: ['outPosition'],
     })
-    transform.model.setAttributes({ inSeed: seedBuffer })
+    transform.model.setAttributes({ inTrip: tripBuffer, inTiming: timingBuffer })
     transform.model.setBindings({ flowTexture })
 
     const model = new Model(device, {
@@ -288,29 +304,108 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     this.state.historyHead = 0
     this.state.stepCount = 0
     this.state.seedBuffer = seedBuffer
+    this.state.tripBuffer = tripBuffer
+    this.state.timingBuffer = timingBuffer
+    this.state.tripData = tripData
+    this.state.timingData = timingData
+    this.state.endAt = endAt
     this.state.flowTexture = flowTexture
     this.state.flowField = flowField
     this.state.transform = transform
     this.state.model = model
     this.state.current = 0
     this.state.lastStepTime = performance.now() / 1000
+
+    if (this.props.animate) this._scheduleStep()
+    this.setNeedsRedraw()
+  }
+
+  /** Pack one trip into slot `p` of the CPU mirrors and record when it ends. */
+  private _writeSlot(
+    tripData: Float32Array,
+    timingData: Float32Array,
+    endAt: Float64Array,
+    toUv: (lng: number, lat: number) => [number, number],
+    p: number,
+    trip: Trip,
+    startAt: number,
+    timeScale: number,
+  ) {
+    const [ou, ov] = toUv(trip.origin[0], trip.origin[1])
+    const [du, dv] = toUv(trip.destination[0], trip.destination[1])
+    const duration = Math.max(trip.durationSec, 1e-3)
+    tripData[p * TRIP_STRIDE] = ou
+    tripData[p * TRIP_STRIDE + 1] = ov
+    tripData[p * TRIP_STRIDE + 2] = du
+    tripData[p * TRIP_STRIDE + 3] = dv
+    timingData[p * TIMING_STRIDE] = duration
+    timingData[p * TIMING_STRIDE + 1] = startAt
+    endAt[p] = startAt + duration / timeScale
+  }
+
+  /**
+   * Hand finished slots their next trip. Runs every step; churn is well under
+   * one slot per step at normal rates, so per-slot sub-range writes are the
+   * cheap path. Without a trip ready, the slot replays its current one.
+   */
+  private _reassignFinished(simTime: number) {
+    const { endAt, tripData, timingData, tripBuffer, timingBuffer, queue } = this.state
+    if (!endAt || !tripData || !timingData || !tripBuffer || !timingBuffer || !queue) return
+    const toUv = lngLatToUv(this.props.heightmap.bounds)
+    const timeScale = this.props.timeScale!
+
+    const done: number[] = []
+    for (let p = 0; p < endAt.length; p++) if (endAt[p] <= simTime) done.push(p)
+    if (done.length === 0) return
+
+    for (const p of done) {
+      const trip = queue.take()
+      if (trip) {
+        this._writeSlot(tripData, timingData, endAt, toUv, p, trip, simTime, timeScale)
+      } else {
+        timingData[p * TIMING_STRIDE + 1] = simTime
+        endAt[p] = simTime + timingData[p * TIMING_STRIDE] / timeScale
+      }
+    }
+
+    if (done.length > BULK_WRITE_THRESHOLD) {
+      tripBuffer.write(tripData)
+      timingBuffer.write(timingData)
+      return
+    }
+    for (const p of done) {
+      tripBuffer.write(
+        tripData.subarray(p * TRIP_STRIDE, (p + 1) * TRIP_STRIDE),
+        p * TRIP_STRIDE * 4,
+      )
+      timingBuffer.write(
+        timingData.subarray(p * TIMING_STRIDE, (p + 1) * TIMING_STRIDE),
+        p * TIMING_STRIDE * 4,
+      )
+    }
+  }
+
+  /** timeScale changed: every in-flight trip now ends at a different sim time. */
+  private _recomputeEndTimes() {
+    const { endAt, timingData } = this.state
+    if (!endAt || !timingData) return
+    const timeScale = this.props.timeScale!
+    for (let p = 0; p < endAt.length; p++) {
+      const duration = timingData[p * TIMING_STRIDE]
+      const startAt = timingData[p * TIMING_STRIDE + 1]
+      endAt[p] = startAt + duration / timeScale
+    }
   }
 
   private _rebuildField() {
-    const { heightmap } = this.props
-    const { buffers, transform } = this.state
-    if (!buffers || !transform) return
-    const flowField = computeFlowField(heightmap)
+    const { transform } = this.state
+    if (!transform) return
+    const flowField = computeFlowField(this.props.heightmap)
     this.state.flowTexture?.destroy()
     const flowTexture = this._createFlowTexture(flowField)
     transform.model.setBindings({ flowTexture })
     this.state.flowTexture = flowTexture
     this.state.flowField = flowField
-    const { positions } = seedParticles(heightmap, this.props.numParticles!, this.props.maxAge!)
-    buffers[0].write(positions)
-    buffers[1].write(positions)
-    this.state.history?.forEach((b) => b.write(positions))
-    this.state.current = 0
   }
 
   /**
@@ -357,17 +452,27 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
   }
 
   private _teardown() {
+    this.state.setupToken += 1 // abandon any in-flight _setup()
+    this.state.queue?.dispose()
     this.state.transform?.destroy()
     this.state.model?.destroy()
     this.state.buffers?.forEach((b) => b.destroy())
     this.state.history?.forEach((b) => b.destroy())
     this.state.seedBuffer?.destroy()
+    this.state.tripBuffer?.destroy()
+    this.state.timingBuffer?.destroy()
     this.state.flowTexture?.destroy()
+    this.state.queue = undefined
     this.state.transform = undefined
     this.state.model = undefined
     this.state.buffers = undefined
     this.state.history = undefined
     this.state.seedBuffer = undefined
+    this.state.tripBuffer = undefined
+    this.state.timingBuffer = undefined
+    this.state.tripData = undefined
+    this.state.timingData = undefined
+    this.state.endAt = undefined
     this.state.flowTexture = undefined
   }
 
@@ -388,10 +493,14 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     const now = performance.now() / 1000
     const dt = Math.min(Math.max(now - this.state.lastStepTime, 0), 0.05)
     this.state.lastStepTime = now
+    this.state.simTime += dt
+
+    // Finished slots get their next trip BEFORE the transform runs, so the new
+    // trip's first frame is evaluated this step (progress 0, faded in from there).
+    this._reassignFinished(this.state.simTime)
 
     transform.model.shaderInputs.setProps({ particle: this._uniformValues(dt) })
     transform.run({
-      inputBuffers: { inPosition: buffers[current] },
       outputBuffers: { outPosition: buffers[1 - current] },
       // transform.run() opens a render pass that CLEARS the bound framebuffer
       // by default — discard rasterization and disable every clear, or the
@@ -428,25 +537,20 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     const { heightmap } = this.props
     const flowField = this.state.flowField!
     const [minLng, minLat, maxLng, maxLat] = heightmap.bounds
-    const {
-      heightScale = 4000,
-      speed = 600,
-      jitter = 0.25,
-      flowBlend = 0,
-      maxAge = 300,
-      fadeFrames = 30,
-      pointSize = 3,
-      sizeVariation = 0.5,
-      glow = 0.6,
-      color = [120, 169, 255],
-      zOffset = 15,
-    } = this.props
+    const heightScale = this.props.heightScale!
+    const timeScale = this.props.timeScale!
+    const fadeFraction = this.props.fadeFraction!
+    const pointSize = this.props.pointSize!
+    const sizeVariation = this.props.sizeVariation!
+    const glow = this.props.glow!
+    const color = this.props.color!
+    const zOffset = this.props.zOffset!
     return {
       bounds: [minLng, minLat, maxLng - minLng, maxLat - minLat],
       scale: [1 / flowField.spanXMeters, 1 / flowField.spanYMeters, heightScale, zOffset],
-      motion: [speed, jitter, flowBlend, dt],
-      // Wrapped time (float precision) + respawn-age randomization fraction.
-      lifecycle: [maxAge, (performance.now() / 1000) % 3600, 0.95, fadeFrames],
+      motion: [timeScale, 0, 0, dt],
+      // Progress runs 0..1; the fade window is a fraction of the trip.
+      lifecycle: [1, this.state.simTime, 0, fadeFraction],
       color: [color[0] / 255, color[1] / 255, color[2] / 255, alphaScale],
       sprite: [pointSize * sizeScale, sizeVariation, glow, 0],
     }

@@ -6,6 +6,11 @@ import type { Heightmap } from './types'
  * B = height, A = Seoul mask. 8-bit unorm is the most universally supported
  * texture format there is — float textures are the mobile failure class this
  * project already ran away from.
+ *
+ * Since particles moved to the trip model (src/data/trips.ts) the shader reads
+ * only B (to sit sprites on the surface) and A (to hide them outside Seoul);
+ * the gradient channels are computed but unused. Kept as-is so the texture
+ * layout and the particleSupport.ts probe stay unchanged.
  */
 export interface FlowField {
   /** RGBA rows, bottom-up matching the heightmap grid (width×height×4). */

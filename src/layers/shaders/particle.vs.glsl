@@ -6,7 +6,7 @@
 // height into positions.z, honoring the same "bake, don't fetch" rule as the
 // terrain mesh).
 
-in vec4 positions; // xy = heightmap UV, z = height [0,1] (-1 = hidden), w = age
+in vec4 positions; // xy = heightmap UV, z = height [0,1] (-1 = hidden), w = trip progress 0..1
 in vec2 seeds;
 
 out float vAlpha;
@@ -22,7 +22,10 @@ void main(void) {
   gl_Position = project_position_to_clipspace(pos, vec3(0.0), vec3(0.0), geometry.position);
   DECKGL_FILTER_GL_POSITION(gl_Position, geometry);
 
-  // Fade in at spawn, fade out toward expiry (fade window in frames).
+  // Fade in leaving the origin, fade out approaching the destination. Progress
+  // runs 0..1 (lifecycle.x = 1) and the window (lifecycle.w) is a fraction of the
+  // trip. A finished particle parks at progress 1 -- fully faded -- until the CPU
+  // hands it its next trip, so reassignment never pops.
   float fadeIn = smoothstep(0.0, particle.lifecycle.w, positions.w);
   float fadeOut = 1.0 - smoothstep(particle.lifecycle.x - particle.lifecycle.w,
                                    particle.lifecycle.x, positions.w);

@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react'
 import { Container, Section, Eyebrow } from '../ui/layout'
 import { DEFAULT_SOURCE, SOURCES, getSource } from '../data/sources'
 import type { DatasetId } from '../data/types'
+import type { TripSource } from '../data/trips'
 import { TerrainPanel } from './TerrainPanel'
 import type { PanelCamera } from './TerrainPanel'
 import styles from './Dashboard.module.css'
@@ -55,8 +56,11 @@ function useViewportWidth(): number {
  * responsive grid that caps at 3 columns and wraps onto new rows (up to 6 panels
  * total). Panels are removable down to a minimum of one. The global particle
  * budget re-splits across panels on every add/remove (see particleBudget.ts).
+ *
+ * `tripSource` is the hand-off point for real movement data: every panel's
+ * particles play trips from it (src/data/trips.ts). Omitted → random trips.
  */
-export function Dashboard() {
+export function Dashboard({ tripSource }: { tripSource?: TripSource } = {}) {
   const [panels, setPanels] = useState<PanelDescriptor[]>(() => [
     { key: 0, sourceId: DEFAULT_SOURCE.meta.id },
   ])
@@ -206,6 +210,7 @@ export function Dashboard() {
                 <div className={styles.canvas}>
                   <TerrainPanel
                     source={source}
+                    tripSource={tripSource}
                     activePanels={panels.length}
                     camera={cameraFor(panel.key)}
                     onCameraChange={handleCameraChange(panel.key)}
