@@ -57,9 +57,14 @@ const DATASETS: Dataset[] = [
     body: 'Where Seoul actually lives: 2024 resident population from Statistics Korea’s SGIS 100 m grid, summed per 250 m cell — apartment belts rise as ridges, mountains and the river fall away.',
     unit: 'Unit · people',
   },
+  {
+    title: 'Businesses (사업체)',
+    body: 'Where Seoul works: 2024 business establishments from the same SGIS 100 m grid, summed per 250 m cell — office cores and commercial corridors stand up as sharp ridges.',
+    unit: 'Unit · establishments',
+  },
 ]
 
-/** Project explanation section — concept, pipeline, and the five datasets. */
+/** Project explanation section — concept, pipeline, and the six datasets. */
 export function About() {
   return (
     <Section id="about" divided>
@@ -91,7 +96,7 @@ export function About() {
         </div>
 
         <div className={styles.datasets}>
-          <h3 className={styles.subhead}>Five datasets</h3>
+          <h3 className={styles.subhead}>Six datasets</h3>
           <div className={styles.cardGrid}>
             {DATASETS.map((dataset) => (
               <article key={dataset.title} className={styles.card}>
