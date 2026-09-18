@@ -30,6 +30,11 @@ export interface OdFlow {
   label: string
   /** Default particle color — the flows are told apart by color alone. */
   color: string
+  /**
+   * Drawn when the dashboard first loads. Such a flow also falls back to random
+   * trips when Supabase is unavailable, so the default view is never motionless.
+   */
+  defaultOn: boolean
   /** Where the OD endpoints live: `placeId`, `lat`, `lon` columns. */
   placeTable: string
   placeId: string
@@ -55,6 +60,7 @@ export const FLOWS: readonly OdFlow[] = [
     id: 'bike',
     label: 'Bike trips (따릉이)',
     color: '#f4f4f4', // near-white — legible on both the cyan and the red end of the ramp
+    defaultOn: false,
     placeTable: 'bike_station',
     placeId: 'station_no',
     sampleRpc: 'sample_bike_od',
@@ -66,6 +72,7 @@ export const FLOWS: readonly OdFlow[] = [
     id: 'migration',
     label: 'Living migration (생활이동)',
     color: '#f1c21b', // Carbon Yellow 30 — the one hue far from cyan, red and white
+    defaultOn: true,
     placeTable: 'living_migration_adm_dong',
     placeId: 'admdong_cd',
     sampleRpc: 'sample_living_migration',

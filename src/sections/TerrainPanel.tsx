@@ -514,10 +514,9 @@ export function TerrainPanel({
     return FLOWS.map((flow) => ({
       flow,
       schedule: sharedTripSchedule(`${flow.id}|${speed}|${timeScale}`, () => {
-        // Without Supabase the bike flow alone falls back to random trips, so the
-        // site still moves; a second random swarm would just be noise.
-        const fallback =
-          flow.id === 'bike' ? randomTripSource(heightmap, { speedMps }) : undefined
+        // Without Supabase only the default-on flow falls back to random trips, so
+        // the site still moves; a second random swarm would just be noise.
+        const fallback = flow.defaultOn ? randomTripSource(heightmap, { speedMps }) : undefined
         return new TripSchedule(odTripSource(flow, { fallback, speedMps }), timeScale)
       }),
     }))

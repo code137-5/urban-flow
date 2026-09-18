@@ -80,7 +80,8 @@ hand in the SQL Editor; same-place pairs excluded) into one page-wide reservoir 
 request volume does not grow with panel count. Duration = distance / the panel's speed knob ×
 the flow's `speedScale` — there is no travel-time data. Needs `VITE_SUPABASE_URL` /
 `VITE_SUPABASE_ANON_KEY` (`.env.local`, and Vercel env); without them, or on any failure, the
-bike flow falls back to `randomTripSource` and the other flow just doesn't draw. The console
+default-on flow falls back to `randomTripSource` and the other just doesn't draw. Only living
+migration is on when the dashboard loads (`defaultOn` in `FLOWS`); bike is one click away. The console
 gets one `[urban-flow] Supabase (<flow>): …` status line per flow. A trip source must never
 reject — `TripQueue` retries a rejecting source forever; an empty batch parks it for good.
 

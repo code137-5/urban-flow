@@ -30,6 +30,10 @@ const MAX_PANELS = 6
  * flows — inside the desktop particle budget (24,000), so the slider never lies.
  */
 const DEFAULT_FLOW_COUNTS: Record<FlowId, number> = { bike: 400, migration: 400 }
+const DEFAULT_FLOWS_ON = Object.fromEntries(FLOWS.map((f) => [f.id, f.defaultOn])) as Record<
+  FlowId,
+  boolean
+>
 const FLOW_COUNT_MIN = 100
 const FLOW_COUNT_MAX = 2000
 const FLOW_COUNT_STEP = 100
@@ -95,7 +99,7 @@ export function Dashboard() {
   // particles-per-panel count. `flowCounts` tracks the slider thumbs live;
   // `committedCounts` follows once the drag settles, because a new count rebuilds
   // every panel's particle buffers.
-  const [flowsOn, setFlowsOn] = useState<Record<FlowId, boolean>>({ bike: true, migration: true })
+  const [flowsOn, setFlowsOn] = useState<Record<FlowId, boolean>>(DEFAULT_FLOWS_ON)
   const [flowCounts, setFlowCounts] = useState<Record<FlowId, number>>(DEFAULT_FLOW_COUNTS)
   const [committedCounts, setCommittedCounts] = useState(flowCounts)
   useEffect(() => {
