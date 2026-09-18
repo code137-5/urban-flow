@@ -19,8 +19,44 @@
    right-aligned. */
 .toolbar {
   display: flex;
-  justify-content: flex-end;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-sm) var(--space-lg);
   margin-bottom: var(--space-md);
+}
+
+/* Particle-flow switches: the swatch is that flow's particle color, so the row
+   doubles as the legend. */
+.flowToggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm) var(--space-lg);
+}
+
+.flowSwatch {
+  flex: none;
+  width: 8px;
+  height: 8px;
+}
+
+/* One flow: its toggle, then a particles-per-panel slider and readout. */
+.flowControl {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.flowCount {
+  min-width: 4ch;
+  font: var(--type-caption);
+  letter-spacing: 0.32px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.slider:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 /* Carbon-style checkbox row on dark: flat 0px box, 1px hairline, a light fill +

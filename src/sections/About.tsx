@@ -27,7 +27,7 @@ const STEPS: Step[] = [
   {
     no: '03',
     title: 'GPU particle flow',
-    body: 'Thousands of particles flow across the terrain in real time on the GPU, revealing the direction and intensity of the city’s movement.',
+    body: 'Particles replay real origin–destination trips across the terrain in real time on the GPU, revealing the direction and intensity of the city’s movement.',
   },
 ]
 
@@ -69,7 +69,24 @@ const DATASETS: Dataset[] = [
   },
 ]
 
-/** Project explanation section — concept, pipeline, and the seven datasets. */
+/**
+ * The two particle flows. They carry the provenance and caveats the old load-time
+ * notice dialog used to show — this section is now the only place they live.
+ */
+const FLOWS: Dataset[] = [
+  {
+    title: 'Bike trips (따릉이)',
+    body: 'Ttareungi public-bike rentals between stations. Station pairs are sampled in proportion to their trip counts and drawn as straight lines at an illustrative speed; rides returned to the same station are left out.',
+    unit: 'White particles · station to station',
+  },
+  {
+    title: 'Living migration (생활이동)',
+    body: 'Seoul living-migration movement between administrative dongs, sampled the same way. Endpoints are scattered around each dong’s centre, and movement inside a single dong is left out.',
+    unit: 'Yellow particles · dong to dong',
+  },
+]
+
+/** Project explanation section — concept, pipeline, the seven datasets and the two flows. */
 export function About() {
   return (
     <Section id="about" divided>
@@ -108,6 +125,19 @@ export function About() {
                 <h4 className={styles.cardTitle}>{dataset.title}</h4>
                 <p className={styles.cardBody}>{dataset.body}</p>
                 <p className={styles.cardMeta}>{dataset.unit}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+
+        <div className={styles.datasets}>
+          <h3 className={styles.subhead}>Two particle flows</h3>
+          <div className={styles.cardGrid}>
+            {FLOWS.map((flow) => (
+              <article key={flow.title} className={styles.card}>
+                <h4 className={styles.cardTitle}>{flow.title}</h4>
+                <p className={styles.cardBody}>{flow.body}</p>
+                <p className={styles.cardMeta}>{flow.unit}</p>
               </article>
             ))}
           </div>

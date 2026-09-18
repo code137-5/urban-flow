@@ -55,16 +55,35 @@ particles in lockstep** — a panel added later joins mid-flight — and only th
 them differs, which is what makes panels comparable. The clock advances only while some layer
 ticks it, so it freezes when every panel is paused. Keep per-panel state out of particle motion.
 
-Trips are **real Ttareungi (따릉이) OD pairs** from Supabase (`src/data/bikeTrips.ts`, the only
-file that knows the schema: `bike_rental` ~930k `(rent_station_no, return_station_no, trips)`
-rows, `bike_station` coordinates). Pairs are drawn **∝ trips** server-side by the
-`sample_bike_od(n)` RPC (`supabase/bike_od_sampling.sql`, run by hand in the SQL Editor;
-same-station round trips excluded) into one page-wide reservoir that every panel samples
-from, so request volume does not grow with panel count. Duration = distance / the panel's
-speed knob — there is no ride-time data. Needs `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`
-(`.env.local`, and Vercel env); without them, or on any failure, it falls back to
-`randomTripSource`. A trip source must never reject or return `[]` — `TripQueue` retries a
-rejecting source forever and latches `exhausted` on an empty batch.
+Two deck.gl / luma.gl 9.3 traps in `ParticleLayer` (both were silent bugs):
+- **GPU state belongs in the layer's `parameters` prop** (set in `defaultProps`), not the
+  `Model`'s — deck calls `model.setParameters(layer parameters)` on every draw and wipes the
+  Model's own. With deck's defaults the sprites alpha-blend and *write depth*, so a trail's
+  near-transparent quad hides particles passing behind it (they blink crossing trails).
+- **`encoder.finish()` does not run anything** — copies execute on
+  `device.submit(encoder.finish())`. Without the submit the trail history never filled and
+  trails were invisible.
+
+Trips are **real OD pairs** from Supabase (`src/data/odTrips.ts`, the only file that knows the
+schema). Two flows (`FLOWS`), drawn **at the same time** as separate color-coded particle
+layers; the dashboard-wide toolbar gives each an on/off toggle (its swatch doubles as the
+legend) and a particles-per-panel slider (100–2000, default 400):
+- **bike** — Ttareungi (따릉이): `bike_rental` ~930k `(rent_station_no, return_station_no,
+  trips)` rows + `bike_station` coordinates. Near-white.
+- **migration** — living migration (생활이동): `living_migration` ~179k `(o_admdong_cd,
+  d_admdong_cd, trips)` rows + `living_migration_adm_dong` centroids (426 dongs). Yellow.
+  Endpoints are scattered around each centroid (radius = half the nearest-centroid distance)
+  so trips between two dongs don't all ride one line.
+
+Pairs are drawn **∝ trips** server-side by one RPC per flow (`supabase/*_sampling.sql`, run by
+hand in the SQL Editor; same-place pairs excluded) into one page-wide reservoir per flow, so
+request volume does not grow with panel count. Duration = distance / the panel's speed knob ×
+the flow's `speedScale` — there is no travel-time data. Needs `VITE_SUPABASE_URL` /
+`VITE_SUPABASE_ANON_KEY` (`.env.local`, and Vercel env); without them, or on any failure, the
+default-on flow falls back to `randomTripSource` and the other just doesn't draw. Only living
+migration is on when the dashboard loads (`defaultOn` in `FLOWS`); bike is one click away. The console
+gets one `[urban-flow] Supabase (<flow>): …` status line per flow. A trip source must never
+reject — `TripQueue` retries a rejecting source forever; an empty batch parks it for good.
 
 *Measured* scalar fields (DEM, S-DoT sensors) must be preprocessed onto a **complete regular
 grid** (`scripts/preprocess/contours.ts`, `scripts/preprocess/sensors.ts`) — the runtime KDE
@@ -107,8 +126,10 @@ implementation source of truth. Rules that are easy to violate:
   Blue 40 (`#78a9ff`); the primary button keeps Blue 60 (`#0f62fe`). No second brand color.
   - **Exception:** the contour terrain itself is the data encoding, so it carries its own
     ramp — low `#80fff6` (cyan) → peak `#ff0000` (red), `DEFAULT_CONTROLS` in
-    `src/sections/TerrainPanel.tsx` — and particles are near-white `#f4f4f4` to stay legible
-    on both ends. This is a deliberate user decision (Sept 2026); keep chrome colors out of it.
+    `src/sections/TerrainPanel.tsx` — and particles are color-coded per flow (`FLOWS` in
+    `src/data/odTrips.ts`): bike near-white `#f4f4f4`, living migration Carbon Yellow 30
+    `#f1c21b`, both legible on either end of the ramp. These are deliberate user decisions
+    (Sept 2026); keep chrome colors out of it.
 - The visualization canvas sits directly on `--bg` `#161616` — one continuous dark surface
   with the site chrome.
 

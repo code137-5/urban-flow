@@ -11,8 +11,8 @@
  * via a `uf-shader-error` event so the app can show it on-screen — most mobile
  * browsers don't expose a usable console. We also emit rich diagnostics
  * (renderer/vendor/version, a global shader index, and the full numbered source)
- * to the console so an on-device debugger like eruda can read them, and expose
- * `window.__ufShaderErrors` for interactive inspection.
+ * to the console for remote debugging, and expose `window.__ufShaderErrors` for
+ * interactive inspection.
  *
  * (3) Some mobile GLSL ES drivers reject any non-ASCII byte in the shader source
  * (em-dashes and other Unicode in comments), often failing with an *empty* info
@@ -33,7 +33,7 @@
  * (5) Qualcomm Adreno 710 (and possibly other Adreno 7xx) rejects our fragment
  * shaders with an empty info log whenever `NV_shader_noperspective_interpolation`
  * has been enabled on the context — proven by on-device forensics that bisected
- * the enabled-extension list (F3 culprit). luma.gl enables every supported
+ * the enabled-extension list. luma.gl enables every supported
  * extension at startup, poisoning its own context. Nothing in this app uses
  * noperspective interpolation, so we hide the extension entirely: `getExtension`
  * returns null for it and `getSupportedExtensions` omits it.
@@ -58,48 +58,15 @@ export type ShaderError = {
   translated?: string
   /** Global 1-based index of this `compileShader` call — tells you WHICH shader failed. */
   index?: number
-  /**
-   * The exact context the failing compile ran on, so post-mortem probes can
-   * re-test the same source on the SAME (possibly poisoned) context as well as
-   * on a fresh one. Debug tooling only — never read by app code.
-   */
-  gl?: WebGL2RenderingContext
 }
 
 /** Latest captured shader compile errors (most recent last). */
 export const shaderErrors: ShaderError[] = []
 
-/** One recorded `compileShader` call, kept only in debug mode. */
-export type CompiledEntry = {
-  /** Same global 1-based index the `[uf-trace]` line reports. */
-  index: number
-  stage: 'vertex' | 'fragment'
-  /** Compile status AFTER the empty-log auto-retry. */
-  ok: boolean
-  /** The cleaned source actually handed to the driver. */
-  source: string
-}
-
-/**
- * Every source compiled in this page, in order — the raw material for the
- * forensics replay (`runForensics` in `debugProbes.ts`), which recompiles the
- * prefix before a failure on a FRESH context to test whether the compile
- * SEQUENCE alone poisons a context.
- *
- * Populated ONLY when `traceEnabled` (localStorage `uf-debug`), and capped, so
- * normal visitors keep an empty array and pay nothing.
- */
-export const compiledLog: CompiledEntry[] = []
-
-/** Hard cap on `compiledLog`; deck.gl compiles far fewer than this per page. */
-const COMPILED_LOG_LIMIT = 64
-
 declare global {
   interface Window {
-    /** Captured shader compile errors, for on-device inspection (e.g. eruda). */
+    /** Captured shader compile errors, for interactive inspection. */
     __ufShaderErrors?: ShaderError[]
-    /** Every compiled shader source, in order (debug mode only). */
-    __ufCompiledLog?: CompiledEntry[]
   }
 }
 
@@ -192,39 +159,6 @@ const contextDiag = new WeakMap<WebGL2RenderingContext, ContextDiag>()
 let compileCount = 0
 
 /**
- * Debug-mode compile tracing. Read once at module load (before any context
- * exists) from the same `uf-debug` flag `debug.ts` gates on, so normal visitors
- * pay nothing and see nothing. The trace exists because the phone's failures are
- * STATE/ORDER-dependent: knowing how many shaders compiled, in what order, and
- * which named one broke is the whole signal.
- */
-const traceEnabled = (() => {
-  try {
-    return localStorage.getItem('uf-debug') === '1'
-  } catch {
-    return false
-  }
-})()
-
-/** `#define SHADER_NAME foo-layer-fragment-shader` — luma names every shader it assembles. */
-function shaderName(source: string | undefined): string {
-  const m = source ? /#define SHADER_NAME (\S+)/.exec(source) : null
-  return m ? m[1] : '?'
-}
-
-/** ONE terse line per compileShader call, console.error so eruda shows it. */
-function trace(index: number, stage: string, ok: boolean, source: string | undefined): void {
-  try {
-    console.error(
-      `[uf-trace] #${index} ${stage} ${ok ? 'ok' : 'FAIL'} ${shaderName(source)} ` +
-        `len=${source ? source.length : 0}`,
-    )
-  } catch {
-    /* ignore */
-  }
-}
-
-/**
  * Shaders that already used up their one auto-retry. A driver whose compiler
  * service crashed reports failure with an EMPTY info log; the service respawns,
  * so a second `compileShader` on the same shader object can succeed. Retrying
@@ -283,7 +217,7 @@ function reportShaderError(err: ShaderError): void {
   } catch {
     /* ignore */
   }
-  // (1) device + failing-shader context, eruda-friendly single line.
+  // (1) device + failing-shader context, as one line.
   try {
     console.error(
       `[urban-flow] shader #${err.index ?? '?'} (${err.stage}) failed | ` +
@@ -295,7 +229,7 @@ function reportShaderError(err: ShaderError): void {
   } catch {
     /* ignore */
   }
-  // (2) full numbered source, chunked so eruda can render each block.
+  // (2) full numbered source, chunked so consoles render each block whole.
   try {
     const numbered = err.source
       .split('\n')
@@ -375,72 +309,9 @@ function patchExtensions(proto: GL | undefined): void {
   proto.__ufExtPatched = true
 }
 
-type SourceFn = (shader: WebGLShader, source: string) => void
-type CompileFn = (shader: WebGLShader) => void
-
-/**
- * The pre-patch `shaderSource` / `compileShader`, keyed by the prototype they
- * were taken from. `compileQuiet` uses these so probe compiles never run through
- * the reporting patch (which would push into `shaderErrors` and dump the full
- * numbered source for every intentionally-failing probe).
- */
-const originalSource = new WeakMap<object, SourceFn>()
-const originalCompile = new WeakMap<object, CompileFn>()
-
-/** Walk the context's prototype chain for a remembered original. */
-function findOriginal<T>(gl: object, map: WeakMap<object, T>): T | undefined {
-  let proto: object | null = Object.getPrototypeOf(gl) as object | null
-  while (proto) {
-    const fn = map.get(proto)
-    if (fn) return fn
-    proto = Object.getPrototypeOf(proto) as object | null
-  }
-  return undefined
-}
-
-/**
- * Compile `source` on `gl` and return the status WITHOUT any of the reporting
- * side effects of the patched `compileShader`: nothing is pushed into
- * `shaderErrors`, no console dump, no `uf-shader-error` event. The source still
- * goes through `sanitizeShaderSource` explicitly, so a quiet compile sees
- * exactly the bytes a real shader would.
- *
- * Intended for the on-device probe lab (`debugProbes.ts`), where most probes are
- * expected to fail and the noise would bury the useful signal.
- */
-export function compileQuiet(
-  gl: WebGL2RenderingContext,
-  type: number,
-  source: string,
-): { ok: boolean; log: string } {
-  const shader = gl.createShader(type)
-  if (!shader) return { ok: false, log: '(createShader returned null)' }
-  try {
-    const clean = sanitizeShaderSource(source)
-    const setSource = findOriginal(gl, originalSource)
-    const compile = findOriginal(gl, originalCompile)
-    if (setSource) setSource.call(gl, shader, clean)
-    else gl.shaderSource(shader, clean)
-    if (compile) compile.call(gl, shader)
-    else gl.compileShader(shader)
-    const ok = Boolean(gl.getShaderParameter(shader, gl.COMPILE_STATUS))
-    const log = ok ? '' : gl.getShaderInfoLog(shader) || '(driver returned an empty info log)'
-    return { ok, log }
-  } catch (e) {
-    return { ok: false, log: `(threw: ${String(e)})` }
-  } finally {
-    try {
-      gl.deleteShader(shader)
-    } catch {
-      /* ignore */
-    }
-  }
-}
-
 function patchShaderSource(proto: GL | undefined): void {
   if (!proto || !proto.shaderSource || proto.__ufSanitized) return
   const original = proto.shaderSource
-  originalSource.set(proto, original as SourceFn)
   proto.shaderSource = function (this: WebGL2RenderingContext, shader, source) {
     const clean = typeof source === 'string' ? sanitizeShaderSource(source) : source
     if (shader && typeof clean === 'string') sources.set(shader, clean)
@@ -452,7 +323,6 @@ function patchShaderSource(proto: GL | undefined): void {
 function patchCompileShader(proto: GL | undefined): void {
   if (!proto || !proto.compileShader || proto.__ufCompilePatched) return
   const original = proto.compileShader
-  originalCompile.set(proto, original as CompileFn)
   proto.compileShader = function (this: WebGL2RenderingContext, shader) {
     const index = ++compileCount
     original.call(this, shader)
@@ -481,19 +351,9 @@ function patchCompileShader(proto: GL | undefined): void {
         }
       }
 
-      const type = this.getShaderParameter(shader, this.SHADER_TYPE)
-      const stage: 'vertex' | 'fragment' = type === this.VERTEX_SHADER ? 'vertex' : 'fragment'
-
-      if (traceEnabled) {
-        trace(index, stage, ok, sources.get(shader))
-        // Record the source itself (post-retry status) so forensics can replay
-        // the exact compile sequence later. Silently stops at the cap.
-        if (compiledLog.length < COMPILED_LOG_LIMIT) {
-          compiledLog.push({ index, stage, ok, source: sources.get(shader) ?? '' })
-        }
-      }
-
       if (!ok) {
+        const type = this.getShaderParameter(shader, this.SHADER_TYPE)
+        const stage = type === this.VERTEX_SHADER ? 'vertex' : 'fragment'
         const log = rawLog || '(driver returned an empty info log)'
         const diag = getContextDiag(this)
         let translated: string | undefined
@@ -509,7 +369,6 @@ function patchCompileShader(proto: GL | undefined): void {
           source: sources.get(shader) ?? '',
           index,
           translated,
-          gl: this,
           renderer: diag.renderer,
           vendor: diag.vendor,
           version: diag.version,
@@ -545,8 +404,6 @@ function patchLinkProgram(proto: GL | undefined): void {
 export function installWebglCompat(): void {
   if (typeof window === 'undefined') return
   window.__ufShaderErrors = shaderErrors
-  // Left undefined for normal visitors: its presence IS the "debug mode" tell.
-  if (traceEnabled) window.__ufCompiledLog = compiledLog
   for (const ctor of [window.WebGL2RenderingContext, window.WebGLRenderingContext]) {
     const proto = ctor?.prototype as GL | undefined
     patchExtensions(proto)
