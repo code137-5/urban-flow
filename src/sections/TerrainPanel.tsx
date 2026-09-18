@@ -26,7 +26,7 @@ const GRID_SIZE = 200
 
 // The speed knob is tuned for cross-city random trips (~10 km → ~15 s). Real bike
 // trips are short — median ~1 km, p90 ~3 km — so at that speed they would blink
-// out in ~1 s. Scaling it down gives a median trip ~2 s, p90 ~6 s.
+// out in under a second. Scaling it down gives a median trip ~1.4 s, p90 ~4 s.
 const BIKE_SPEED_SCALE = 0.6
 
 // Fallback view used before the container has been measured (0×0 during the
@@ -165,10 +165,10 @@ const DEFAULT_CONTROLS: Controls = {
   particleCount: 400,
   // Centre of the trip speed range (m/s, poster-scale) — trips run at 0.7–1.3×
   // this; bike trips additionally × BIKE_SPEED_SCALE.
-  particleSpeed: 900,
+  particleSpeed: 1250,
   particleTimeScale: 1, // playback multiplier on every trip's duration
   particleFade: 0.1, // fade in/out window at each end, fraction of the trip
-  particleSize: 3,
+  particleSize: 4,
   particleGlow: 0.6, // halo strength — overlapping particles bloom additively
   particleTrail: 0.7, // ghost-afterimage strength (0 = off)
   particleTrailLength: 8, // ghost snapshots in the trail
