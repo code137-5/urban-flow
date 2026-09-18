@@ -14,14 +14,20 @@ import { particlesSupported } from '../layers/particleSupport'
 import { detectGpuTier, perPanelParticleCount } from '../layers/particleBudget'
 import { usePanelVisibility } from '../hooks/usePanelVisibility'
 import { shaderErrors, type ShaderError } from '../webgl-compat'
+import { bikeTripSource } from '../data/bikeTrips'
 import { randomTripSource } from '../data/trips'
-import type { TripSource } from '../data/trips'
+import { TripSchedule, sharedTripSchedule } from '../layers/tripSchedule'
 import type { DataSource, GeoPoint, Heightmap } from '../data/types'
 import styles from './Dashboard.module.css'
 
 // 200×200 matches the reference; the Seoul mask (point-in-polygon) for it is
 // ~1s once per session, then cached.
 const GRID_SIZE = 200
+
+// The speed knob is tuned for cross-city random trips (~10 km → ~15 s). Real bike
+// trips are short — median ~1 km, p90 ~3 km — so at that speed they would blink
+// out in ~1 s. Scaling it down gives a median trip ~2 s, p90 ~6 s.
+const BIKE_SPEED_SCALE = 0.6
 
 // Fallback view used before the container has been measured (0×0 during the
 // first render, before layout). The shared INITIAL_VIEW_STATE frames Seoul for a
@@ -157,9 +163,9 @@ const DEFAULT_CONTROLS: Controls = {
   riverOpacity: 0.42,
   particlesOn: true,
   particleCount: 400,
-  // Centre of the random trip generator's speed range (m/s, poster-scale) —
-  // trips run at 0.7–1.3× this. Irrelevant once trips come from an API.
-  particleSpeed: 700,
+  // Centre of the trip speed range (m/s, poster-scale) — trips run at 0.7–1.3×
+  // this; bike trips additionally × BIKE_SPEED_SCALE.
+  particleSpeed: 900,
   particleTimeScale: 1, // playback multiplier on every trip's duration
   particleFade: 0.1, // fade in/out window at each end, fraction of the trip
   particleSize: 3,
@@ -231,21 +237,18 @@ function RecenterIcon() {
  * dashboard owns this state so it can mirror one panel's camera across all
  * panels ("sync views"). A null `camera` means "use the fit".
  *
- * Particles play trips from `tripSource` (src/data/trips.ts). When none is
- * given, the panel synthesizes random in-mask trips — this prop is where an API
- * adapter plugs in later.
+ * Particles play real Ttareungi trips (src/data/bikeTrips.ts) from a schedule
+ * shared by every panel, so all panels show the same particles in lockstep and
+ * only the terrain under them differs.
  */
 export function TerrainPanel({
   source,
-  tripSource: tripSourceProp,
   activePanels = 1,
   camera,
   onCameraChange,
   onResetCamera,
 }: {
   source: DataSource
-  /** Where particle trips come from. Default: random trips inside Seoul. */
-  tripSource?: TripSource
   /** Live panel count — splits the global particle budget (particleBudget.ts). */
   activePanels?: number
   camera: PanelCamera | null
@@ -493,15 +496,25 @@ export function TerrainPanel({
     }
   }, [])
 
-  // Trip supplier for the particles. The random generator is keyed on the
-  // heightmap (it samples the Seoul mask) and the speed knob only — a new
-  // source rebuilds the particle layer, so color/size tweaks must not touch it.
+  // What the particles play: real Ttareungi OD pairs, with random trips as the
+  // fallback when Supabase is unavailable. The schedule is shared page-wide per
+  // (speed, time scale), so every panel at the same settings gets the SAME object
+  // and moves in lockstep. A new schedule rebuilds the particle layer, so it is
+  // keyed on those two knobs only; the heightmap is needed just once, for the
+  // fallback's Seoul mask (identical across datasets).
   const speed = controls.particleSpeed
-  const tripSource = useMemo<TripSource | null>(() => {
-    if (tripSourceProp) return tripSourceProp
+  const timeScale = controls.particleTimeScale
+  const schedule = useMemo<TripSchedule | null>(() => {
     if (!heightmap) return null
-    return randomTripSource(heightmap, { speedMps: [speed * 0.7, speed * 1.3] })
-  }, [tripSourceProp, heightmap, speed])
+    return sharedTripSchedule(`bike|${speed}|${timeScale}`, () => {
+      const speedMps: [number, number] = [speed * 0.7, speed * 1.3]
+      const source = bikeTripSource({
+        fallback: randomTripSource(heightmap, { speedMps }),
+        speedMps: [speedMps[0] * BIKE_SPEED_SCALE, speedMps[1] * BIKE_SPEED_SCALE],
+      })
+      return new TripSchedule(source, timeScale)
+    })
+  }, [heightmap, speed, timeScale])
 
   const layers = useMemo<Layer[]>(() => {
     if (!heightmap) return []
@@ -525,16 +538,15 @@ export function TerrainPanel({
         peakColor: hexToRgb(controls.peakColor),
         opacity: controls.contourOpacity,
       }),
-      ...(particlesOk && controls.particlesOn && tripSource
+      ...(particlesOk && controls.particlesOn && schedule
         ? [
             new ParticleLayer({
               id: `particles-${source.meta.id}`,
               heightmap,
-              tripSource,
+              schedule,
               numParticles: perPanelParticleCount(activePanels, controls.particleCount),
               // Same knob as the terrain layer → particles always sit on the surface.
               heightScale: controls.height,
-              timeScale: controls.particleTimeScale,
               fadeFraction: controls.particleFade,
               pointSize: controls.particleSize,
               glow: controls.particleGlow,
@@ -548,7 +560,7 @@ export function TerrainPanel({
           ]
         : []),
     ]
-  }, [heightmap, tripSource, controls, source.meta.id, particlesOk, animate, activePanels])
+  }, [heightmap, schedule, controls, source.meta.id, particlesOk, animate, activePanels])
 
   if (webglFailed) {
     return (

@@ -44,10 +44,27 @@ rendered by deck.gl. The whole pipeline depends only on the generic `GeoPoint` m
 Particles are **trip players**, not flow-field walkers: each particle slot plays one `Trip`
 `{ origin, destination, durationSec }` (`src/data/trips.ts`) as a straight line over the
 terrain, then takes the next one from a `TripSource` via a prefetching `TripQueue`
-(`src/layers/tripQueue.ts`, batched requests). `randomTripSource` synthesizes trips today;
-an API adapter later implements the same `TripSource.next(count)` and is passed to
-`Dashboard`/`TerrainPanel` as `tripSource`. The CPU predicts each trip's end from
-`startAt + duration / timeScale` — no GPU readback — and rewrites only that slot.
+(`src/layers/tripQueue.ts`, batched requests). The CPU predicts each trip's end from
+`startAt + duration` — no GPU readback — and rewrites only that slot.
+
+That slot bookkeeping (which trip, since when, on which clock) lives in a **shared
+`TripSchedule`** (`src/layers/tripSchedule.ts`), not in the layer: every panel at the same
+speed / time-scale gets the same schedule object (`sharedTripSchedule`), and each
+`ParticleLayer` only mirrors it into its own GPU buffers. So all panels show **identical
+particles in lockstep** — a panel added later joins mid-flight — and only the terrain under
+them differs, which is what makes panels comparable. The clock advances only while some layer
+ticks it, so it freezes when every panel is paused. Keep per-panel state out of particle motion.
+
+Trips are **real Ttareungi (따릉이) OD pairs** from Supabase (`src/data/bikeTrips.ts`, the only
+file that knows the schema: `bike_rental` ~930k `(rent_station_no, return_station_no, trips)`
+rows, `bike_station` coordinates). Pairs are drawn **∝ trips** server-side by the
+`sample_bike_od(n)` RPC (`supabase/bike_od_sampling.sql`, run by hand in the SQL Editor;
+same-station round trips excluded) into one page-wide reservoir that every panel samples
+from, so request volume does not grow with panel count. Duration = distance / the panel's
+speed knob — there is no ride-time data. Needs `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`
+(`.env.local`, and Vercel env); without them, or on any failure, it falls back to
+`randomTripSource`. A trip source must never reject or return `[]` — `TripQueue` retries a
+rejecting source forever and latches `exhausted` on an empty batch.
 
 *Measured* scalar fields (DEM, S-DoT sensors) must be preprocessed onto a **complete regular
 grid** (`scripts/preprocess/contours.ts`, `scripts/preprocess/sensors.ts`) — the runtime KDE
