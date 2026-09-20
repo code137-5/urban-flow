@@ -67,7 +67,7 @@ Two deck.gl / luma.gl 9.3 traps in `ParticleLayer` (both were silent bugs):
 Trips are **real OD pairs** from Supabase (`src/data/odTrips.ts`, the only file that knows the
 schema). Two flows (`FLOWS`), drawn **at the same time** as separate color-coded particle
 layers; the dashboard-wide toolbar gives each an on/off toggle (its swatch doubles as the
-legend). Particles are a fixed **250 per flow per panel** (`PARTICLES_PER_FLOW`; `?tune` can override
+legend). Particles are a fixed **400 per flow per panel** (`PARTICLES_PER_FLOW`; `?tune` can override
 it), all the same size — no per-particle size variation. Each flow's toolbar row also
 carries its own **time-of-day range slider** (`src/ui/RangeSlider.tsx` — two thumbs, whole
 hours, half-open `[from, to)`, no wrap past midnight, default **07–10**) choosing which

@@ -175,15 +175,17 @@ const DEFAULT_CONTROLS: Controls = {
   particleFade: 0.1, // fade-in window leaving the origin, fraction of the trip (no fade-out)
   particleArrivalRamp: 1, // alpha climbs with progress: faint leaving, bright landing (0 = flat)
   particleSize: 5,
-  particleGlow: 0.6, // halo strength — overlapping particles bloom additively
-  particleHalo: 2, // sprite ÷ core dot: how far each halo reaches (wider = more overlap)
-  particleTrail: 0.5, // ghost-afterimage strength (0 = off)
+  particleGlow: 1.25, // halo strength — overlapping particles bloom additively
+  particleHalo: 5, // sprite ÷ core dot: how far each halo reaches (wider = more overlap)
+  particleTrail: 0.3, // ghost-afterimage strength (0 = off)
   particleTrailLength: 20, // ghost snapshots in the trail (~4 s of path at gap 6)
   particleTrailGap: 6, // sim steps between snapshots (spacing)
   // One color per flow — the only thing telling them apart (defaults in odTrips.ts).
   bikeColor: FLOW_BY_ID.bike.color,
   migrationColor: FLOW_BY_ID.migration.color,
-  particleOpacity: 1,
+  // Low on purpose: with wide additive halos, faint sprites let density read as
+  // brightness — busy corridors light up instead of every dot saturating.
+  particleOpacity: 0.4,
 }
 
 // Cap the canvas backing-store resolution: 6 panels at DPR 3 is what actually

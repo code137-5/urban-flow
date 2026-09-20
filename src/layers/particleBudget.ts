@@ -25,11 +25,11 @@ export function detectGpuTier(): GpuTier {
 
 /**
  * Particles per flow per panel — fixed in the UI, now that the toolbar spends its
- * sliders on the time-of-day windows. The worst case (6 panels × 2 flows × 250 =
- * 3,000) sits far inside the global budget below. The `?tune` panel can override
+ * sliders on the time-of-day windows. The worst case (6 panels × 2 flows × 400 =
+ * 4,800) sits far inside the global budget below. The `?tune` panel can override
  * it for the panel it drives; `perPanelParticleCount` still clamps the result.
  */
-export const PARTICLES_PER_FLOW = 250
+export const PARTICLES_PER_FLOW = 400
 
 /** Total base particles across ALL live panels. */
 export const GLOBAL_PARTICLE_BUDGET: Record<GpuTier, number> = {
