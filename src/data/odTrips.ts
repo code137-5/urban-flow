@@ -21,11 +21,15 @@ import type { Trip, TripSource } from './trips'
  * costs nothing, and one timer per flow slowly refreshes the visible window so the
  * long tail of pairs rotates through.
  *
- * The time-of-day window is page-wide module state here, NOT a parameter of the
- * schedule key (tripSchedule.ts): keying schedules by it would tear down every
- * ParticleLayer and blank the swarm on each change. Instead the window is read at
- * `next()` time and the schedules' prefetch pools are flushed, so particles in
- * flight land normally and only the trips after them come from the new window.
+ * Each flow carries its OWN time-of-day window — bike at 07–10 against migration
+ * at 17–20 is a legitimate comparison — held as module state here, one per flow.
+ * Page-wide across panels is the part that matters for the dashboard: every panel
+ * reads the same window for a given flow, which is what keeps their swarms in
+ * lockstep. The window stays OUT of the schedule key (tripSchedule.ts) all the
+ * same: keying schedules by it would tear down every ParticleLayer and blank the
+ * swarm on each change. Instead the window is read at `next()` time and only that
+ * flow's prefetch pools are flushed, so particles in flight land normally and only
+ * the trips after them come from the new window.
  *
  * Places (station / dong coordinates) are hour-independent, so they are paginated
  * once per flow per page load and shared by every window.
@@ -109,13 +113,6 @@ const RESERVOIR_BATCHES = 5 // × PAGE_SIZE samples held in memory
 const RESERVOIR_CACHE = 6 // hour windows kept per flow (LRU) — ~5k legs each
 const REFRESH_MS = 60_000
 
-/**
- * The dashboard-wide time-of-day window. Page-wide module state on purpose: it
- * must stay out of the shared-schedule key (see the file header), and every panel
- * and both flows read the same one.
- */
-let hourRange: HourRange = DEFAULT_HOUR_RANGE
-
 /** Whole hours, `lo` in [0,23] and `hi` in [lo+1,24] — clamped, never wrapped. */
 function clampHourRange(from: number, to: number): HourRange {
   const lo = Math.min(23, Math.max(0, Math.round(from)))
@@ -123,19 +120,21 @@ function clampHourRange(from: number, to: number): HourRange {
 }
 
 /**
- * Move the window. Returns true only when it actually moved, so the caller knows
- * whether to flush the schedules — and so a repeated (or StrictMode-doubled) call
- * with the same hours is a no-op.
+ * Move one flow's window. Returns true only when it actually moved, so the caller
+ * knows whether to flush that flow's schedules — and so a repeated (or
+ * StrictMode-doubled) call with the same hours is a no-op. `stateFor` keys by id,
+ * so the window can be set before this flow has ever loaded a reservoir.
  */
-export function setOdHourRange(from: number, to: number): boolean {
+export function setOdHourRange(flowId: FlowId, from: number, to: number): boolean {
+  const state = stateFor(flowId)
   const next = clampHourRange(from, to)
-  if (next[0] === hourRange[0] && next[1] === hourRange[1]) return false
-  hourRange = next
+  if (next[0] === state.range[0] && next[1] === state.range[1]) return false
+  state.range = next
   return true
 }
 
-export function getOdHourRange(): HourRange {
-  return hourRange
+export function getOdHourRange(flowId: FlowId): HourRange {
+  return stateFor(flowId).range
 }
 
 /**
@@ -219,6 +218,8 @@ async function sampleLegs(
 
 /** Everything the page keeps per flow. One instance, created on first use. */
 interface FlowState {
+  /** This flow's own time-of-day window — the one every panel samples it in. */
+  range: HourRange
   /** Endpoint coordinates — hour-independent, so paginated once and reused. */
   places: Promise<Places> | null
   /** Reservoir per hour window, keyed `${from}-${to}`, used as an LRU. */
@@ -235,10 +236,15 @@ interface FlowState {
 
 const states = new Map<FlowId, FlowState>()
 
-function stateFor(flow: OdFlow): FlowState {
-  let state = states.get(flow.id)
+/**
+ * Keyed by id, not by `OdFlow`, so the hour setter can create a flow's state
+ * before anything has asked it for trips.
+ */
+function stateFor(flowId: FlowId): FlowState {
+  let state = states.get(flowId)
   if (!state) {
     state = {
+      range: DEFAULT_HOUR_RANGE,
       places: null,
       reservoirs: new Map(),
       live: null,
@@ -246,7 +252,7 @@ function stateFor(flow: OdFlow): FlowState {
       announced: false,
       failed: false,
     }
-    states.set(flow.id, state)
+    states.set(flowId, state)
   }
   return state
 }
@@ -275,14 +281,15 @@ function placesFor(state: FlowState, client: SupabaseClient, flow: OdFlow): Prom
 
 /**
  * One slow refresh timer per flow: every tick it samples fresh legs for whichever
- * window is on screen *now* and overwrites random entries of that reservoir IN
- * PLACE — trip sources hold the array itself, so it must never be swapped out.
+ * window this flow is showing *now* — read at tick time, so a slider move needs no
+ * re-arming — and overwrites random entries of that reservoir IN PLACE: trip
+ * sources hold the array itself, so it must never be swapped out.
  */
 function armRefresh(state: FlowState, client: SupabaseClient, flow: OdFlow): void {
   if (state.timer !== null) return
   state.timer = setInterval(() => {
     if (document.hidden) return
-    const range = hourRange
+    const range = state.range
     const key = rangeKey(range)
     const cached = state.reservoirs.get(key)
     const places = state.places
@@ -325,7 +332,7 @@ function evict(state: FlowState, keep: string): void {
  * previous one playing instead of stalling the swarm.
  */
 function reservoirFor(flow: OdFlow, range: HourRange): Promise<Leg[] | null> {
-  const state = stateFor(flow)
+  const state = stateFor(flow.id)
   const key = rangeKey(range)
   const cached = state.reservoirs.get(key)
   if (cached) {
@@ -406,8 +413,8 @@ export interface OdTripOptions {
 }
 
 /**
- * Trips sampled from a flow's real OD pairs, in whatever time-of-day window is
- * selected when the batch is requested. Never rejects — TripQueue retries a
+ * Trips sampled from a flow's real OD pairs, in whatever time-of-day window that
+ * flow is set to when the batch is requested. Never rejects — TripQueue retries a
  * rejecting source forever — so any failure is handed to `fallback`, or answered
  * with an empty batch (which parks the flow for this page load).
  */
@@ -427,9 +434,10 @@ export function odTripSource(flow: OdFlow, opts: OdTripOptions = {}): TripSource
 
   return {
     next: async (count) => {
-      // Read the window at call time, not at construction: the source outlives
-      // every change to it, and the pool it feeds was flushed for exactly this.
-      const legs = await reservoirFor(flow, hourRange)
+      // Read this flow's window at call time, not at construction: the source
+      // outlives every change to it, and the pool it feeds was flushed for
+      // exactly this.
+      const legs = await reservoirFor(flow, stateFor(flow.id).range)
       if (!legs || legs.length === 0) return fallback ? fallback.next(count) : []
       return Array.from({ length: count }, (): Trip => {
         let origin: [number, number]

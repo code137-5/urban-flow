@@ -67,10 +67,10 @@ Two deck.gl / luma.gl 9.3 traps in `ParticleLayer` (both were silent bugs):
 Trips are **real OD pairs** from Supabase (`src/data/odTrips.ts`, the only file that knows the
 schema). Two flows (`FLOWS`), drawn **at the same time** as separate color-coded particle
 layers; the dashboard-wide toolbar gives each an on/off toggle (its swatch doubles as the
-legend). Particles are a fixed **200 per flow per panel**. One dashboard-wide **time-of-day
-range slider** (`src/ui/RangeSlider.tsx` — two thumbs, whole hours, half-open `[from, to)`,
-no wrap past midnight, default **07–10**) chooses which hours the OD pairs are drawn from,
-for every panel and both flows:
+legend). Particles are a fixed **200 per flow per panel**. Each flow's toolbar row also
+carries its own **time-of-day range slider** (`src/ui/RangeSlider.tsx` — two thumbs, whole
+hours, half-open `[from, to)`, no wrap past midnight, default **07–10**) choosing which
+hours that flow's OD pairs are drawn from — per flow, but the same for every panel:
 - **bike** — Ttareungi (따릉이): `bike_rental_hourly` ~3.45M `(rent_station_no,
   return_station_no, hour, trips)` rows + `bike_station` coordinates. Near-white.
 - **migration** — living migration (생활이동): `living_migration_hourly` ~1.54M
@@ -84,11 +84,11 @@ SQL Editor: a per-hour cumulative-weight materialized view + a 24-row totals vie
 `r` per draw picking both the hour and the pair; same-place pairs excluded; the pre-hourly
 `supabase/*_sampling.sql` stay on disk, superseded). One page-wide reservoir per **(flow, hour
 window)** — LRU of 6 windows, places paginated once per flow, one 60 s rotating-refresh timer
-per flow — so request volume does not grow with panel count. **The hour window is page-wide
-module state in `odTrips.ts` (`setOdHourRange`) and deliberately NOT part of the
-`sharedTripSchedule` key**: re-keying would tear down every `ParticleLayer` and blank the
-swarm. Instead the dashboard calls `flushSharedTripSchedules()`, which drops only the
-prefetched trips — particles in flight finish their trip and the next ones come from the new
+per flow — so request volume does not grow with panel count. **Each flow's hour window is
+page-wide module state in `odTrips.ts` (`setOdHourRange(flowId, …)`) and deliberately NOT
+part of the `sharedTripSchedule` key**: re-keying would tear down every `ParticleLayer` and
+blank the swarm. Instead the dashboard calls `flushSharedTripSchedules('<flow>|')`, which
+drops only that flow's prefetched trips — particles in flight finish their trip and the next ones come from the new
 hours. Duration = distance / the panel's speed knob ×
 the flow's `speedScale` — there is no travel-time data. Needs `VITE_SUPABASE_URL` /
 `VITE_SUPABASE_ANON_KEY` (`.env.local`, and Vercel env); without them, or on any failure, the

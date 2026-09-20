@@ -39,8 +39,12 @@ const DEFAULT_FLOWS_ON = Object.fromEntries(FLOWS.map((f) => [f.id, f.defaultOn]
   boolean
 >
 
-/** Debounce on the hour thumbs: each committed change refetches both flows' reservoirs. */
+/** Debounce on the hour thumbs: each committed change refetches that flow's reservoir. */
 const HOUR_COMMIT_MS = 200
+/** Both flows open on the same window; from here on each moves independently. */
+const DEFAULT_HOUR_RANGES = Object.fromEntries(
+  FLOWS.map((f) => [f.id, [DEFAULT_HOUR_RANGE[0], DEFAULT_HOUR_RANGE[1]]]),
+) as Record<FlowId, [number, number]>
 /** Quiet marks at 06 / 12 / 18 so the 0–24 track reads as a day. */
 const HOUR_TICKS = [6, 12, 18]
 /** 7 → "07:00". The upper extreme reads "24:00" — the window is half-open. */
@@ -81,8 +85,10 @@ function useViewportWidth(): number {
  * total). Panels are removable down to a minimum of one. The global particle
  * budget re-splits across panels on every add/remove (see particleBudget.ts).
  * Every panel plays the same particles in lockstep (layers/tripSchedule.ts);
- * which OD flows are drawn and which hours of the day they are sampled from are
- * both dashboard-wide choices, so panels stay comparable.
+ * which OD flows are drawn, and which hours of the day each flow is sampled from,
+ * are dashboard-wide choices — the same for every panel, so panels stay
+ * comparable. The hours are per flow, though: bike at 07–10 next to living
+ * migration at 17–20 is a comparison worth being able to make.
  */
 export function Dashboard() {
   const [panels, setPanels] = useState<PanelDescriptor[]>(() => [
@@ -117,27 +123,31 @@ export function Dashboard() {
     [flowsOn],
   )
 
-  // Dashboard-wide time-of-day window, half-open [from, to) in whole hours.
-  // `hourRange` tracks the thumbs live; `committedHours` follows once the drag
-  // settles, because every committed change refetches both flows' OD reservoirs.
-  const [hourRange, setHourRange] = useState<[number, number]>(() => [
-    DEFAULT_HOUR_RANGE[0],
-    DEFAULT_HOUR_RANGE[1],
-  ])
-  const [committedHours, setCommittedHours] = useState(hourRange)
+  // One time-of-day window per flow, half-open [from, to) in whole hours.
+  // `hourRanges` tracks the thumbs live; `committedHours` follows once the drag
+  // settles, because every committed change refetches that flow's OD reservoir.
+  const [hourRanges, setHourRanges] =
+    useState<Record<FlowId, [number, number]>>(DEFAULT_HOUR_RANGES)
+  const [committedHours, setCommittedHours] = useState(hourRanges)
   useEffect(() => {
-    const id = setTimeout(() => setCommittedHours(hourRange), HOUR_COMMIT_MS)
+    const id = setTimeout(() => setCommittedHours(hourRanges), HOUR_COMMIT_MS)
     return () => clearTimeout(id)
-  }, [hourRange])
-  // The window is page-wide module state inside odTrips.ts — deliberately NOT a
+  }, [hourRanges])
+  // The windows are page-wide module state inside odTrips.ts — deliberately NOT a
   // TerrainPanel prop and NOT part of the shared-schedule key. Re-keying the
   // schedules would rebuild every ParticleLayer and blank the swarm on each
   // change; flushing the prefetch pools instead lets the trips in flight land
-  // normally and only the ones after them come from the new hours. Seeding the
-  // state from DEFAULT_HOUR_RANGE makes `setOdHourRange` a no-op on mount, so
-  // nothing is flushed until the user actually moves a thumb.
+  // normally and only the ones after them come from the new hours. The keys are
+  // `${flow}|${speed}|${timeScale}`, so the `${flow.id}|` prefix flushes exactly
+  // the schedules that just changed window — moving the bike thumbs must not
+  // refetch living migration. Seeding the state from DEFAULT_HOUR_RANGE makes
+  // `setOdHourRange` a no-op on mount, so nothing is flushed until the user
+  // actually moves a thumb.
   useEffect(() => {
-    if (setOdHourRange(committedHours[0], committedHours[1])) flushSharedTripSchedules()
+    for (const flow of FLOWS) {
+      const [from, to] = committedHours[flow.id]
+      if (setOdHourRange(flow.id, from, to)) flushSharedTripSchedules(`${flow.id}|`)
+    }
   }, [committedHours])
 
   // Without Supabase env the flows fall back to random trips, where an hour
@@ -158,9 +168,11 @@ export function Dashboard() {
     }
   }, [])
 
-  const hoursDisabled = !odLive || (!flowsOn.bike && !flowsOn.migration)
-  const hoursPending = hourRange[0] !== committedHours[0] || hourRange[1] !== committedHours[1]
   const firstKey = panels[0]?.key ?? 0
+
+  /** Move one flow's thumbs; the debounce above turns this into a refetch. */
+  const setFlowHours = (flowId: FlowId) => (next: [number, number]) =>
+    setHourRanges((prev) => ({ ...prev, [flowId]: next }))
 
   const cameraFor = (key: number): PanelCamera | null => cameras[linked ? firstKey : key] ?? null
 
@@ -233,54 +245,74 @@ export function Dashboard() {
         </p>
 
         <div className={styles.toolbar}>
-          <div className={styles.flowToggles} role="group" aria-label="Particle flows">
-            {FLOWS.map((flow) => (
-              <label className={styles.syncToggle} key={flow.id}>
-                <input
-                  type="checkbox"
-                  className={styles.syncCheckbox}
-                  checked={flowsOn[flow.id]}
-                  onChange={() => setFlowsOn((prev) => ({ ...prev, [flow.id]: !prev[flow.id] }))}
-                />
-                <span
-                  className={styles.flowSwatch}
-                  style={{ background: flow.color }}
-                  aria-hidden="true"
-                />
-                <span>{flow.label}</span>
-              </label>
-            ))}
-          </div>
-
-          {/* Time-of-day window: one dashboard-wide choice, so every panel draws
-              the same hours. Double-click the slider to go back to 07–10. */}
-          <div
-            className={`${styles.timeRange}${hoursDisabled ? ` ${styles.timeRangeDisabled}` : ''}`}
-          >
-            <span className={styles.timeRangeLabel}>Time of day</span>
-            <RangeSlider
-              className={styles.timeRangeSlider}
-              min={0}
-              max={24}
-              step={1}
-              minGap={1}
-              value={hourRange}
-              onChange={setHourRange}
-              ticks={HOUR_TICKS}
-              formatValue={formatHour}
-              formatBound={formatHourBound}
-              ariaLabels={['Start hour', 'End hour']}
-              onReset={() => setHourRange([DEFAULT_HOUR_RANGE[0], DEFAULT_HOUR_RANGE[1]])}
-              disabled={hoursDisabled}
-            />
-            <span
-              className={`${styles.timeRangeValue}${hoursPending ? ` ${styles.timeRangePending}` : ''}`}
-            >
-              {formatHour(hourRange[0])}–{formatHour(hourRange[1])}
-            </span>
-            {odLive ? null : (
-              <span className={styles.timeRangeHint}>Live OD data unavailable</span>
-            )}
+          {/* One row per flow: its on/off switch (the swatch doubles as the
+              legend) · its own time-of-day window · its readout. The three
+              columns live on .flowRows, not on the rows, so both rails start and
+              end at the same x despite the labels' different widths. No "Time of
+              day" caption: the 00–24 bounds, the 06/12/18 ticks and the "07:00–
+              10:00" readout already say what the rail is, twice over per row. */}
+          <div className={styles.flowRows} role="group" aria-label="Particle flows">
+            {FLOWS.map((flow) => {
+              const live = hourRanges[flow.id]
+              const committed = committedHours[flow.id]
+              // The hours mean nothing for a flow that isn't drawn, and nothing
+              // at all without Supabase (the fallback trips are synthetic).
+              const hoursDisabled = !odLive || !flowsOn[flow.id]
+              const hoursPending = live[0] !== committed[0] || live[1] !== committed[1]
+              return (
+                <div className={styles.flowRow} key={flow.id}>
+                  <label className={styles.syncToggle}>
+                    <input
+                      type="checkbox"
+                      className={styles.syncCheckbox}
+                      checked={flowsOn[flow.id]}
+                      onChange={() =>
+                        setFlowsOn((prev) => ({ ...prev, [flow.id]: !prev[flow.id] }))
+                      }
+                    />
+                    <span
+                      className={styles.flowSwatch}
+                      style={{ background: flow.color }}
+                      aria-hidden="true"
+                    />
+                    <span>{flow.label}</span>
+                  </label>
+                  {/* Double-click this flow's track to send it back to 07–10 —
+                      only this flow; the other one's window is untouched. */}
+                  <RangeSlider
+                    className={styles.hourSlider}
+                    min={0}
+                    max={24}
+                    step={1}
+                    minGap={1}
+                    value={live}
+                    onChange={setFlowHours(flow.id)}
+                    ticks={HOUR_TICKS}
+                    formatValue={formatHour}
+                    formatBound={formatHourBound}
+                    ariaLabels={[`${flow.label} start hour`, `${flow.label} end hour`]}
+                    onReset={() =>
+                      setFlowHours(flow.id)([DEFAULT_HOUR_RANGE[0], DEFAULT_HOUR_RANGE[1]])
+                    }
+                    disabled={hoursDisabled}
+                  />
+                  <span
+                    className={[
+                      styles.hourValue,
+                      hoursPending ? styles.hourPending : '',
+                      hoursDisabled ? styles.hourDisabled : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                  >
+                    {formatHour(live[0])}–{formatHour(live[1])}
+                  </span>
+                </div>
+              )
+            })}
+            {/* One hint for the toolbar, not one per row — the cause is the
+                build's missing Supabase env, which is the same for both flows. */}
+            {odLive ? null : <span className={styles.hourHint}>Live OD data unavailable</span>}
           </div>
 
           <label className={`${styles.syncToggle} ${styles.syncViews}`}>
