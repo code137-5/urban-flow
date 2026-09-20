@@ -36,10 +36,11 @@ void main(void) {
   float ramp = mix(1.0, positions.w, particle.lifecycle.z);
   vAlpha = fadeIn * fadeOut * ramp * (1.0 - hidden);
 
-  // Every particle is the same size -- one dot, one trip. Doubled so the fragment
-  // shader has room for a wide glow halo around the core dot; overlapping halos
-  // accumulate under additive blending.
-  gl_PointSize = particle.sprite.x * 2.0;
+  // Every particle is the same size -- one dot, one trip. The sprite is the core
+  // dot times the halo scale (sprite.w, 2 by default), so the fragment shader has
+  // room for a wide glow halo; overlapping halos accumulate under additive
+  // blending, which is what makes busy corridors light up.
+  gl_PointSize = particle.sprite.x * particle.sprite.w;
 
   vec4 color = vec4(0.0);
   DECKGL_FILTER_COLOR(color, geometry);

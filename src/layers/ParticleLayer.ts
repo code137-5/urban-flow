@@ -33,6 +33,8 @@ export type ParticleLayerProps = {
   pointSize?: number
   /** Halo strength 0–1 — overlapping halos bloom under additive blending. */
   glow?: number
+  /** Sprite diameter as a multiple of the core dot — how far the halo reaches. */
+  haloScale?: number
   /** Trail (ghost afterimage) strength 0–1; 0 disables the history draws. */
   trail?: number
   /** Number of ghost snapshots in the trail — one extra draw call each. Change = history realloc. */
@@ -56,6 +58,7 @@ const defaultProps: DefaultProps<ParticleLayerProps & Pick<LayerProps, 'paramete
   arrivalRamp: { type: 'number', value: 0 },
   pointSize: { type: 'number', value: 3 },
   glow: { type: 'number', value: 0.6 },
+  haloScale: { type: 'number', value: 2 },
   trail: { type: 'number', value: 0.7 },
   trailLength: { type: 'number', value: 8 },
   trailGap: { type: 'number', value: 6 },
@@ -488,6 +491,7 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     const arrivalRamp = this.props.arrivalRamp!
     const pointSize = this.props.pointSize!
     const glow = this.props.glow!
+    const haloScale = Math.max(1, this.props.haloScale!)
     const color = this.props.color!
     const zOffset = this.props.zOffset!
     return {
@@ -498,7 +502,7 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
       // Progress runs 0..1; the fade window is a fraction of the trip.
       lifecycle: [1, this.state.simTime, arrivalRamp, fadeFraction],
       color: [color[0] / 255, color[1] / 255, color[2] / 255, alphaScale],
-      sprite: [pointSize * sizeScale, 0, glow, 0],
+      sprite: [pointSize * sizeScale, 0, glow, haloScale],
     }
   }
 }

@@ -133,6 +133,7 @@ type Controls = {
   particleArrivalRamp: number
   particleSize: number
   particleGlow: number
+  particleHalo: number
   particleTrail: number
   particleTrailLength: number
   particleTrailGap: number
@@ -175,6 +176,7 @@ const DEFAULT_CONTROLS: Controls = {
   particleArrivalRamp: 1, // alpha climbs with progress: faint leaving, bright landing (0 = flat)
   particleSize: 5,
   particleGlow: 0.6, // halo strength — overlapping particles bloom additively
+  particleHalo: 2, // sprite ÷ core dot: how far each halo reaches (wider = more overlap)
   particleTrail: 0.5, // ghost-afterimage strength (0 = off)
   particleTrailLength: 20, // ghost snapshots in the trail (~4 s of path at gap 6)
   particleTrailGap: 6, // sim steps between snapshots (spacing)
@@ -500,9 +502,12 @@ export function TerrainPanel({
       pt.add(s, 'particleFade', 0, 0.5, 0.01).name('fade (of trip)').onChange(sync)
       pt.add(s, 'particleArrivalRamp', 0, 1, 0.05).name('arrival ramp').onChange(sync)
       pt.add(s, 'particleSize', 1, 8, 0.5).name('size (px)').onChange(sync)
-      pt.add(s, 'particleGlow', 0, 1, 0.05).name('glow').onChange(sync)
+      // Glow past 1 and a wide halo turn the swarm into a density read: where
+      // particles crowd, their halos stack additively and the corridor lights up.
+      pt.add(s, 'particleGlow', 0, 3, 0.05).name('glow (halo strength)').onChange(sync)
+      pt.add(s, 'particleHalo', 1, 10, 0.5).name('halo size (× dot)').onChange(sync)
       pt.add(s, 'particleTrail', 0, 1, 0.05).name('trail opacity').onChange(sync)
-      pt.add(s, 'particleTrailLength', 1, 50, 1).name('trail length').onChange(sync)
+      pt.add(s, 'particleTrailLength', 1, 120, 1).name('trail length').onChange(sync)
       pt.add(s, 'particleTrailGap', 1, 50, 1).name('trail gap (steps)').onChange(sync)
       pt.addColor(s, 'bikeColor').name('bike color').onChange(sync)
       pt.addColor(s, 'migrationColor').name('migration color').onChange(sync)
@@ -591,6 +596,7 @@ export function TerrainPanel({
               arrivalRamp: controls.particleArrivalRamp,
               pointSize: controls.particleSize,
               glow: controls.particleGlow,
+              haloScale: controls.particleHalo,
               trail: controls.particleTrail,
               trailLength: controls.particleTrailLength,
               trailGap: controls.particleTrailGap,
