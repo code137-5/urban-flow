@@ -32,6 +32,7 @@
   --border-subtle: #393939;
   --border-subtle-02: #525252;
   --border-strong: #6f6f6f;
+  --border-strong-hover: #8d8d8d; /* Gray 50 — hover step for a strong hairline (slider rail) */
   --border-inverse: #f4f4f4;
 
   /* ---- Accent: IBM Blue ---- */

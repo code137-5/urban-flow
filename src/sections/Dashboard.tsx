@@ -3,8 +3,10 @@ import type { CSSProperties } from 'react'
 import { Container, Section, Eyebrow } from '../ui/layout'
 import { DEFAULT_SOURCE, SOURCES, getSource } from '../data/sources'
 import type { DatasetId } from '../data/types'
-import { FLOWS } from '../data/odTrips'
+import { DEFAULT_HOUR_RANGE, FLOWS, odConfigured, setOdHourRange } from '../data/odTrips'
 import type { FlowId } from '../data/odTrips'
+import { flushSharedTripSchedules } from '../layers/tripSchedule'
+import { RangeSlider } from '../ui/RangeSlider'
 import { TerrainPanel } from './TerrainPanel'
 import type { PanelCamera } from './TerrainPanel'
 import styles from './Dashboard.module.css'
@@ -26,18 +28,25 @@ interface PanelDescriptor {
 const MAX_PANELS = 6
 
 /**
- * Particles per flow per panel. The ceiling keeps the worst case — 6 panels × 2
- * flows — inside the desktop particle budget (24,000), so the slider never lies.
+ * Particles per flow per panel — fixed, now that the toolbar spends its slider
+ * on the time-of-day window instead. The worst case (6 panels × 2 flows × 200 =
+ * 2,400) sits far inside the global particle budget, and `perPanelParticleCount`
+ * still clamps whatever it is handed, so nothing here can overdraw.
  */
-const DEFAULT_FLOW_COUNTS: Record<FlowId, number> = { bike: 400, migration: 400 }
+const PARTICLES_PER_FLOW = 200
 const DEFAULT_FLOWS_ON = Object.fromEntries(FLOWS.map((f) => [f.id, f.defaultOn])) as Record<
   FlowId,
   boolean
 >
-const FLOW_COUNT_MIN = 100
-const FLOW_COUNT_MAX = 2000
-const FLOW_COUNT_STEP = 100
-const COUNT_COMMIT_MS = 150
+
+/** Debounce on the hour thumbs: each committed change refetches both flows' reservoirs. */
+const HOUR_COMMIT_MS = 200
+/** Quiet marks at 06 / 12 / 18 so the 0–24 track reads as a day. */
+const HOUR_TICKS = [6, 12, 18]
+/** 7 → "07:00". The upper extreme reads "24:00" — the window is half-open. */
+const formatHour = (h: number) => `${String(h).padStart(2, '0')}:00`
+/** Bound labels flanking the track stay to the bare 2-digit hour. */
+const formatHourBound = (h: number) => String(h).padStart(2, '0')
 
 /**
  * Carbon responsive column cap by viewport width (md = 672, lg = 1056):
@@ -71,8 +80,9 @@ function useViewportWidth(): number {
  * responsive grid that caps at 3 columns and wraps onto new rows (up to 6 panels
  * total). Panels are removable down to a minimum of one. The global particle
  * budget re-splits across panels on every add/remove (see particleBudget.ts).
- * Every panel plays the same particles in lockstep (layers/tripSchedule.ts); which
- * OD flows they are is one dashboard-wide choice, so panels stay comparable.
+ * Every panel plays the same particles in lockstep (layers/tripSchedule.ts);
+ * which OD flows are drawn and which hours of the day they are sampled from are
+ * both dashboard-wide choices, so panels stay comparable.
  */
 export function Dashboard() {
   const [panels, setPanels] = useState<PanelDescriptor[]>(() => [
@@ -95,24 +105,61 @@ export function Dashboard() {
   // comparisons line up out of the box. The toggle stays disabled until a second
   // panel exists (nothing to sync with one panel).
   const [linked, setLinked] = useState(true)
-  // Particle flows drawn in every panel, each its own color: on/off plus a
-  // particles-per-panel count. `flowCounts` tracks the slider thumbs live;
-  // `committedCounts` follows once the drag settles, because a new count rebuilds
-  // every panel's particle buffers.
+  // Particle flows drawn in every panel, each its own color. TerrainPanel takes a
+  // count per flow, where 0 means "off" — the count itself is fixed now, so the
+  // toggles are all that move it.
   const [flowsOn, setFlowsOn] = useState<Record<FlowId, boolean>>(DEFAULT_FLOWS_ON)
-  const [flowCounts, setFlowCounts] = useState<Record<FlowId, number>>(DEFAULT_FLOW_COUNTS)
-  const [committedCounts, setCommittedCounts] = useState(flowCounts)
-  useEffect(() => {
-    const id = setTimeout(() => setCommittedCounts(flowCounts), COUNT_COMMIT_MS)
-    return () => clearTimeout(id)
-  }, [flowCounts])
   const flows = useMemo<Record<FlowId, number>>(
     () => ({
-      bike: flowsOn.bike ? committedCounts.bike : 0,
-      migration: flowsOn.migration ? committedCounts.migration : 0,
+      bike: flowsOn.bike ? PARTICLES_PER_FLOW : 0,
+      migration: flowsOn.migration ? PARTICLES_PER_FLOW : 0,
     }),
-    [flowsOn, committedCounts],
+    [flowsOn],
   )
+
+  // Dashboard-wide time-of-day window, half-open [from, to) in whole hours.
+  // `hourRange` tracks the thumbs live; `committedHours` follows once the drag
+  // settles, because every committed change refetches both flows' OD reservoirs.
+  const [hourRange, setHourRange] = useState<[number, number]>(() => [
+    DEFAULT_HOUR_RANGE[0],
+    DEFAULT_HOUR_RANGE[1],
+  ])
+  const [committedHours, setCommittedHours] = useState(hourRange)
+  useEffect(() => {
+    const id = setTimeout(() => setCommittedHours(hourRange), HOUR_COMMIT_MS)
+    return () => clearTimeout(id)
+  }, [hourRange])
+  // The window is page-wide module state inside odTrips.ts — deliberately NOT a
+  // TerrainPanel prop and NOT part of the shared-schedule key. Re-keying the
+  // schedules would rebuild every ParticleLayer and blank the swarm on each
+  // change; flushing the prefetch pools instead lets the trips in flight land
+  // normally and only the ones after them come from the new hours. Seeding the
+  // state from DEFAULT_HOUR_RANGE makes `setOdHourRange` a no-op on mount, so
+  // nothing is flushed until the user actually moves a thumb.
+  useEffect(() => {
+    if (setOdHourRange(committedHours[0], committedHours[1])) flushSharedTripSchedules()
+  }, [committedHours])
+
+  // Without Supabase env the flows fall back to random trips, where an hour
+  // window means nothing — so say so and lock the slider. Optimistic until the
+  // check resolves, which keeps the common (configured) path from flickering.
+  const [odLive, setOdLive] = useState(true)
+  useEffect(() => {
+    let alive = true
+    // A rejection here means the Supabase client chunk itself failed to load,
+    // which is just as unavailable as a missing key.
+    void odConfigured()
+      .catch(() => false)
+      .then((ok) => {
+        if (alive) setOdLive(ok)
+      })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const hoursDisabled = !odLive || (!flowsOn.bike && !flowsOn.migration)
+  const hoursPending = hourRange[0] !== committedHours[0] || hourRange[1] !== committedHours[1]
   const firstKey = panels[0]?.key ?? 0
 
   const cameraFor = (key: number): PanelCamera | null => cameras[linked ? firstKey : key] ?? null
@@ -188,42 +235,55 @@ export function Dashboard() {
         <div className={styles.toolbar}>
           <div className={styles.flowToggles} role="group" aria-label="Particle flows">
             {FLOWS.map((flow) => (
-              <div className={styles.flowControl} key={flow.id}>
-                <label className={styles.syncToggle}>
-                  <input
-                    type="checkbox"
-                    className={styles.syncCheckbox}
-                    checked={flowsOn[flow.id]}
-                    onChange={() => setFlowsOn((prev) => ({ ...prev, [flow.id]: !prev[flow.id] }))}
-                  />
-                  <span
-                    className={styles.flowSwatch}
-                    style={{ background: flow.color }}
-                    aria-hidden="true"
-                  />
-                  <span>{flow.label}</span>
-                </label>
+              <label className={styles.syncToggle} key={flow.id}>
                 <input
-                  type="range"
-                  className={styles.slider}
-                  min={FLOW_COUNT_MIN}
-                  max={FLOW_COUNT_MAX}
-                  step={FLOW_COUNT_STEP}
-                  value={flowCounts[flow.id]}
-                  disabled={!flowsOn[flow.id]}
-                  aria-label={`${flow.label} particles per panel`}
-                  onChange={(e) =>
-                    setFlowCounts((prev) => ({ ...prev, [flow.id]: Number(e.target.value) }))
-                  }
-                  onDoubleClick={() =>
-                    setFlowCounts((prev) => ({ ...prev, [flow.id]: DEFAULT_FLOW_COUNTS[flow.id] }))
-                  }
+                  type="checkbox"
+                  className={styles.syncCheckbox}
+                  checked={flowsOn[flow.id]}
+                  onChange={() => setFlowsOn((prev) => ({ ...prev, [flow.id]: !prev[flow.id] }))}
                 />
-                <span className={styles.flowCount}>{flowCounts[flow.id]}</span>
-              </div>
+                <span
+                  className={styles.flowSwatch}
+                  style={{ background: flow.color }}
+                  aria-hidden="true"
+                />
+                <span>{flow.label}</span>
+              </label>
             ))}
           </div>
-          <label className={styles.syncToggle}>
+
+          {/* Time-of-day window: one dashboard-wide choice, so every panel draws
+              the same hours. Double-click the slider to go back to 07–10. */}
+          <div
+            className={`${styles.timeRange}${hoursDisabled ? ` ${styles.timeRangeDisabled}` : ''}`}
+          >
+            <span className={styles.timeRangeLabel}>Time of day</span>
+            <RangeSlider
+              className={styles.timeRangeSlider}
+              min={0}
+              max={24}
+              step={1}
+              minGap={1}
+              value={hourRange}
+              onChange={setHourRange}
+              ticks={HOUR_TICKS}
+              formatValue={formatHour}
+              formatBound={formatHourBound}
+              ariaLabels={['Start hour', 'End hour']}
+              onReset={() => setHourRange([DEFAULT_HOUR_RANGE[0], DEFAULT_HOUR_RANGE[1]])}
+              disabled={hoursDisabled}
+            />
+            <span
+              className={`${styles.timeRangeValue}${hoursPending ? ` ${styles.timeRangePending}` : ''}`}
+            >
+              {formatHour(hourRange[0])}–{formatHour(hourRange[1])}
+            </span>
+            {odLive ? null : (
+              <span className={styles.timeRangeHint}>Live OD data unavailable</span>
+            )}
+          </div>
+
+          <label className={`${styles.syncToggle} ${styles.syncViews}`}>
             <input
               type="checkbox"
               className={styles.syncCheckbox}

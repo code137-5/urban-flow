@@ -67,23 +67,37 @@ Two deck.gl / luma.gl 9.3 traps in `ParticleLayer` (both were silent bugs):
 Trips are **real OD pairs** from Supabase (`src/data/odTrips.ts`, the only file that knows the
 schema). Two flows (`FLOWS`), drawn **at the same time** as separate color-coded particle
 layers; the dashboard-wide toolbar gives each an on/off toggle (its swatch doubles as the
-legend) and a particles-per-panel slider (100–2000, default 400):
-- **bike** — Ttareungi (따릉이): `bike_rental` ~930k `(rent_station_no, return_station_no,
-  trips)` rows + `bike_station` coordinates. Near-white.
-- **migration** — living migration (생활이동): `living_migration` ~179k `(o_admdong_cd,
-  d_admdong_cd, trips)` rows + `living_migration_adm_dong` centroids (426 dongs). Yellow.
-  Endpoints are scattered around each centroid (radius = half the nearest-centroid distance)
-  so trips between two dongs don't all ride one line.
+legend). Particles are a fixed **200 per flow per panel**. One dashboard-wide **time-of-day
+range slider** (`src/ui/RangeSlider.tsx` — two thumbs, whole hours, half-open `[from, to)`,
+no wrap past midnight, default **07–10**) chooses which hours the OD pairs are drawn from,
+for every panel and both flows:
+- **bike** — Ttareungi (따릉이): `bike_rental_hourly` ~3.45M `(rent_station_no,
+  return_station_no, hour, trips)` rows + `bike_station` coordinates. Near-white.
+- **migration** — living migration (생활이동): `living_migration_hourly` ~1.54M
+  `(o_admdong_cd, d_admdong_cd, hour, trips)` rows + `living_migration_adm_dong` centroids
+  (426 dongs). Yellow. Endpoints are scattered around each centroid (radius = half the
+  nearest-centroid distance) so trips between two dongs don't all ride one line.
 
-Pairs are drawn **∝ trips** server-side by one RPC per flow (`supabase/*_sampling.sql`, run by
-hand in the SQL Editor; same-place pairs excluded) into one page-wide reservoir per flow, so
-request volume does not grow with panel count. Duration = distance / the panel's speed knob ×
+Pairs are drawn **∝ trips within the selected hour window** server-side by one RPC per flow,
+`sample_*_hourly(n, hour_from, hour_to)` (`supabase/*_hourly_sampling.sql`, run by hand in the
+SQL Editor: a per-hour cumulative-weight materialized view + a 24-row totals view, one random
+`r` per draw picking both the hour and the pair; same-place pairs excluded; the pre-hourly
+`supabase/*_sampling.sql` stay on disk, superseded). One page-wide reservoir per **(flow, hour
+window)** — LRU of 6 windows, places paginated once per flow, one 60 s rotating-refresh timer
+per flow — so request volume does not grow with panel count. **The hour window is page-wide
+module state in `odTrips.ts` (`setOdHourRange`) and deliberately NOT part of the
+`sharedTripSchedule` key**: re-keying would tear down every `ParticleLayer` and blank the
+swarm. Instead the dashboard calls `flushSharedTripSchedules()`, which drops only the
+prefetched trips — particles in flight finish their trip and the next ones come from the new
+hours. Duration = distance / the panel's speed knob ×
 the flow's `speedScale` — there is no travel-time data. Needs `VITE_SUPABASE_URL` /
 `VITE_SUPABASE_ANON_KEY` (`.env.local`, and Vercel env); without them, or on any failure, the
 default-on flow falls back to `randomTripSource` and the other just doesn't draw. Only living
 migration is on when the dashboard loads (`defaultOn` in `FLOWS`); bike is one click away. The console
-gets one `[urban-flow] Supabase (<flow>): …` status line per flow. A trip source must never
-reject — `TripQueue` retries a rejecting source forever; an empty batch parks it for good.
+gets one `[urban-flow] Supabase (<flow>): …` status line per flow per page load (later hour
+windows log at `console.debug`). A trip source must never reject — `TripQueue` retries a
+rejecting source forever; an empty batch parks it for good — so an hour window that fails to
+load after a successful connect keeps the previous window's reservoir playing.
 
 *Measured* scalar fields (DEM, S-DoT sensors) must be preprocessed onto a **complete regular
 grid** (`scripts/preprocess/contours.ts`, `scripts/preprocess/sensors.ts`) — the runtime KDE

@@ -15,12 +15,13 @@
   margin-bottom: var(--space-xxl);
 }
 
-/* Toolbar above the panel grid — holds the cross-panel "sync views" toggle,
-   right-aligned. */
+/* Toolbar above the panel grid — three dashboard-wide groups: the particle-flow
+   switches, the time-of-day window, and the "sync views" toggle. A grid, not a
+   flex row, so the three can re-stack independently as the viewport narrows. */
 .toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
   gap: var(--space-sm) var(--space-lg);
   margin-bottom: var(--space-md);
 }
@@ -39,24 +40,68 @@
   height: 8px;
 }
 
-/* One flow: its toggle, then a particles-per-panel slider and readout. */
-.flowControl {
-  display: inline-flex;
+/* Time-of-day window: label · two-thumb slider · readout, fenced off from the
+   flow switches by one hairline. It wraps, so the "unavailable" hint (and, on
+   narrow viewports, the slider itself) drops to its own line rather than
+   squeezing the track. */
+.timeRange {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--space-sm);
+  row-gap: var(--space-xs);
+  min-height: var(--control-height-sm);
+  padding-left: var(--space-lg);
+  border-left: 1px solid var(--border-subtle);
+  justify-self: start;
+  width: 100%;
+  /* The track takes what the middle column has left — a day needs the length:
+     at 24 steps a short rail leaves the 3 h default window a sliver of fill. */
+  max-width: 720px;
 }
 
-.flowCount {
-  min-width: 4ch;
+/* Both flows off (or no live OD data): the label and readout dim with the slider. */
+.timeRangeDisabled .timeRangeLabel,
+.timeRangeDisabled .timeRangeValue {
+  color: var(--text-disabled);
+}
+
+.timeRangeLabel {
+  flex: none;
+  font: var(--type-body-sm);
+  letter-spacing: 0.16px;
+  color: var(--text-secondary);
+}
+
+.timeRangeSlider {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* "07:00–10:00" — tabular so the thumbs don't shuffle the label sideways. It
+   brightens to --text-primary while the live thumbs are ahead of the committed
+   window, i.e. while the refetch is still pending. */
+.timeRangeValue {
+  flex: none;
+  min-width: 11ch;
+  text-align: right;
   font: var(--type-caption);
   letter-spacing: 0.32px;
   font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
+  transition: color var(--duration-fast-02) var(--ease-standard);
 }
 
-.slider:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
+.timeRangePending {
+  color: var(--text-primary);
+}
+
+/* Shown only when Supabase env is missing: the hours have nothing to filter. */
+.timeRangeHint {
+  flex: 1 0 100%;
+  font: var(--type-caption);
+  letter-spacing: 0.32px;
+  color: var(--text-helper);
 }
 
 /* Carbon-style checkbox row on dark: flat 0px box, 1px hairline, a light fill +
@@ -110,6 +155,66 @@
 .syncCheckbox:disabled {
   border-color: var(--border-subtle);
   cursor: not-allowed;
+}
+
+/* The toolbar-level sync toggle, for grid placement only — it keeps the
+   .syncToggle look. */
+.syncViews {
+  justify-self: end;
+}
+
+/* Carbon xlg: the three toolbar groups need ~1100px of content, so below this
+   the time-of-day window takes a full row of its own and loses the fence — the
+   row edge already separates it. */
+@media (max-width: 1312px) {
+  .toolbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .flowToggles {
+    grid-area: 1 / 1;
+  }
+  .syncViews {
+    grid-area: 1 / 2;
+  }
+  .timeRange {
+    grid-area: 2 / 1 / 2 / -1;
+    max-width: 720px;
+    padding-left: 0;
+    border-left: none;
+  }
+}
+
+/* Carbon md and below: one column, three stacked rows. The time-of-day window
+   gets a hairline above it instead of beside it, and its slider takes a full
+   line so the 180px track never gets crushed. */
+@media (max-width: 672px) {
+  .toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .flowToggles {
+    grid-area: 1 / 1;
+  }
+  .timeRange {
+    grid-area: 2 / 1;
+    max-width: none;
+    padding-top: var(--space-sm);
+    border-top: 1px solid var(--border-subtle);
+  }
+  .syncViews {
+    grid-area: 3 / 1;
+    justify-self: start;
+  }
+  /* Label + readout share the first line; the rail gets the full second one. */
+  .timeRangeValue {
+    margin-left: auto;
+  }
+  .timeRangeSlider {
+    order: 1;
+    flex: 1 0 100%;
+  }
+  .timeRangeHint {
+    order: 2;
+  }
 }
 
 /* Responsive panel grid. `grid-template-columns` is set inline by Dashboard.tsx
@@ -390,7 +495,9 @@
   color: var(--text-secondary);
 }
 
-/* Carbon-flavored range input: 2px track, 14px square thumb, no radius. */
+/* Carbon-flavored single range input: 2px track, 14px square thumb, no radius.
+   Used by TerrainPanel's in-canvas smoothing (σ) slider, which imports this same
+   CSS module — the toolbar's two-thumb slider is ui/RangeSlider instead. */
 .slider {
   -webkit-appearance: none;
   appearance: none;

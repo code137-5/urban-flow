@@ -57,6 +57,27 @@ export class TripSchedule {
   }
 
   /**
+   * Throw away the prefetched trips so the next slot to finish gets one from the
+   * source's new answer — today, the page-wide OD hour window moved.
+   *
+   * This is NOT a reset: the clock, the slot table and every trip in flight are
+   * left alone, so the swarm never blanks and a slot simply switches window when
+   * it next lands. While the new reservoir loads, `queue.take()` returns null and
+   * `tick()` replays the slot's current trip — nothing awaits, nothing stalls.
+   *
+   * Serialised behind `growing` so it cannot empty the pool underneath an
+   * `ensure()` a just-added panel is awaiting. A schedule nothing plays yet stays
+   * lazy: TerrainPanel builds one per flow, including flows that are toggled off,
+   * and an empty slot table means no request goes out for them.
+   */
+  flush(): void {
+    this.growing = this.growing.then(() => {
+      if (this.trips.length === 0) return
+      this.queue.flush()
+    })
+  }
+
+  /**
    * Advance the clock and hand finished slots their next trip. Every layer calls
    * this each step; the deltas between calls add up to real time. Without a trip
    * ready, a slot replays its current one.
@@ -95,4 +116,16 @@ export function sharedTripSchedule(key: string, make: () => TripSchedule): TripS
     shared.set(key, schedule)
   }
   return schedule
+}
+
+/**
+ * Flush every shared schedule — how the dashboard applies a new OD hour window
+ * without touching the schedule keys (`${flow}|${speed}|${timeScale}`), which
+ * would rebuild every ParticleLayer and blank the swarm. `prefix` limits it to one
+ * flow's schedules, e.g. `'bike|'`.
+ */
+export function flushSharedTripSchedules(prefix?: string): void {
+  for (const [key, schedule] of shared) {
+    if (prefix === undefined || key.startsWith(prefix)) schedule.flush()
+  }
 }
