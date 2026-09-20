@@ -172,7 +172,7 @@ const DEFAULT_CONTROLS: Controls = {
   particleSpeed: 1250,
   particleTimeScale: 1, // playback multiplier on every trip's duration
   particleCount: PARTICLES_PER_FLOW, // per flow; ?tune only — the UI keeps it fixed
-  particleFade: 0.1, // fade in/out window at each end, fraction of the trip
+  particleFade: 0.1, // fade-in window leaving the origin, fraction of the trip (no fade-out)
   particleArrivalRamp: 1, // alpha climbs with progress: faint leaving, bright landing (0 = flat)
   particleSize: 5,
   particleGlow: 0.6, // halo strength — overlapping particles bloom additively
@@ -499,7 +499,7 @@ export function TerrainPanel({
       pt.add(s, 'particleCount', 50, 4000, 50).name('count (per flow)').onFinishChange(sync)
       pt.add(s, 'particleSpeed', 100, 2000, 50).name('trip speed (m/s)').onChange(sync)
       pt.add(s, 'particleTimeScale', 0.1, 5, 0.1).name('time scale').onChange(sync)
-      pt.add(s, 'particleFade', 0, 0.5, 0.01).name('fade (of trip)').onChange(sync)
+      pt.add(s, 'particleFade', 0, 0.5, 0.01).name('fade in (of trip)').onChange(sync)
       pt.add(s, 'particleArrivalRamp', 0, 1, 0.05).name('arrival ramp').onChange(sync)
       pt.add(s, 'particleSize', 1, 8, 0.5).name('size (px)').onChange(sync)
       // Glow past 1 and a wide halo turn the swarm into a density read: where

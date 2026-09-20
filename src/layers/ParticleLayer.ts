@@ -25,7 +25,7 @@ export type ParticleLayerProps = {
   numParticles?: number
   /** Peak elevation in meters at height 1.0 — MUST match the terrain layer's. */
   heightScale?: number
-  /** Fade-in/out window at each end of a trip, as a fraction of the trip (0–0.5). */
+  /** Fade-in window at the start of a trip, as a fraction of the trip (0–0.5). There is no fade-out. */
   fadeFraction?: number
   /** 0–1: how much alpha climbs with trip progress (faint at the origin, full at the destination). */
   arrivalRamp?: number

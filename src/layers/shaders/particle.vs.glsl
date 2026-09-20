@@ -21,18 +21,18 @@ void main(void) {
   gl_Position = project_position_to_clipspace(pos, vec3(0.0), vec3(0.0), geometry.position);
   DECKGL_FILTER_GL_POSITION(gl_Position, geometry);
 
-  // Fade in leaving the origin, fade out approaching the destination. Progress
-  // runs 0..1 (lifecycle.x = 1) and the window (lifecycle.w) is a fraction of the
-  // trip. A finished particle parks at progress 1 -- fully faded -- until the CPU
-  // hands it its next trip, so reassignment never pops.
+  // Fade in leaving the origin; NO fade-out (user decision): a particle lands at
+  // full brightness and is gone. Progress runs 0..1 (lifecycle.x = 1) and the
+  // fade-in window (lifecycle.w) is a fraction of the trip. Progress 1 itself is
+  // hidden: that is where a finished slot parks until the CPU hands it its next
+  // trip -- normally the same step, but a slot cleared by TripSchedule.reset()
+  // waits there for the new hour window, and must not sit lit at its destination.
   float fadeIn = smoothstep(0.0, particle.lifecycle.w, positions.w);
-  float fadeOut = 1.0 - smoothstep(particle.lifecycle.x - particle.lifecycle.w,
-                                   particle.lifecycle.x, positions.w);
+  float fadeOut = 1.0 - step(particle.lifecycle.x, positions.w);
   // Arrival ramp (lifecycle.z, 0..1): alpha climbs with progress, so a particle
   // leaves its origin faint and lands bright -- direction reads from a still
-  // frame. 0 keeps the flat, symmetric fade. The short fade-out stays on top so a
-  // landed particle still never pops. Trail ghosts carry their own older progress,
-  // so the tail comes out fainter than the head for free.
+  // frame. 0 keeps the brightness flat after the fade-in. Trail ghosts carry their
+  // own older progress, so the tail comes out fainter than the head for free.
   float ramp = mix(1.0, positions.w, particle.lifecycle.z);
   vAlpha = fadeIn * fadeOut * ramp * (1.0 - hidden);
 
