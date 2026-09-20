@@ -176,7 +176,7 @@ const DEFAULT_CONTROLS: Controls = {
   particleArrivalRamp: 1, // alpha climbs with progress: faint leaving, bright landing (0 = flat)
   particleSize: 5,
   particleGlow: 1.25, // halo strength — overlapping particles bloom additively
-  particleHalo: 5, // sprite ÷ core dot: how far each halo reaches (wider = more overlap)
+  particleHalo: 4, // sprite ÷ core dot: how far each halo reaches (wider = more overlap)
   particleTrail: 0.3, // ghost-afterimage strength (0 = off)
   particleTrailLength: 20, // ghost snapshots in the trail (~4 s of path at gap 6)
   particleTrailGap: 6, // sim steps between snapshots (spacing)
