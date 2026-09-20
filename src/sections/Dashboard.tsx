@@ -5,6 +5,7 @@ import { DEFAULT_SOURCE, SOURCES, getSource } from '../data/sources'
 import type { DatasetId } from '../data/types'
 import { DEFAULT_HOUR_RANGE, FLOWS, odConfigured, setOdHourRange } from '../data/odTrips'
 import type { FlowId } from '../data/odTrips'
+import { PARTICLES_PER_FLOW } from '../layers/particleBudget'
 import { flushSharedTripSchedules } from '../layers/tripSchedule'
 import { RangeSlider } from '../ui/RangeSlider'
 import { TerrainPanel } from './TerrainPanel'
@@ -27,13 +28,6 @@ interface PanelDescriptor {
 /** Two full rows of three. */
 const MAX_PANELS = 6
 
-/**
- * Particles per flow per panel — fixed, now that the toolbar spends its slider
- * on the time-of-day window instead. The worst case (6 panels × 2 flows × 200 =
- * 2,400) sits far inside the global particle budget, and `perPanelParticleCount`
- * still clamps whatever it is handed, so nothing here can overdraw.
- */
-const PARTICLES_PER_FLOW = 200
 const DEFAULT_FLOWS_ON = Object.fromEntries(FLOWS.map((f) => [f.id, f.defaultOn])) as Record<
   FlowId,
   boolean

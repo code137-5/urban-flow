@@ -11,7 +11,7 @@ import { parkLayer, riverLayer } from '../layers/featureOverlays'
 import { ContourFallback } from './ContourFallback'
 import { terrainShaderSupported } from '../layers/terrainSupport'
 import { particlesSupported } from '../layers/particleSupport'
-import { detectGpuTier, perPanelParticleCount } from '../layers/particleBudget'
+import { PARTICLES_PER_FLOW, detectGpuTier, perPanelParticleCount } from '../layers/particleBudget'
 import { usePanelVisibility } from '../hooks/usePanelVisibility'
 import { shaderErrors, type ShaderError } from '../webgl-compat'
 import { FLOWS, FLOW_BY_ID, odTripSource, setOdScatterScale } from '../data/odTrips'
@@ -122,6 +122,7 @@ type Controls = {
   particlesOn: boolean
   particleSpeed: number
   particleTimeScale: number
+  particleCount: number
   particleFade: number
   particleArrivalRamp: number
   particleSize: number
@@ -163,6 +164,7 @@ const DEFAULT_CONTROLS: Controls = {
   // this; real OD flows additionally × their `speedScale` (odTrips.ts).
   particleSpeed: 1250,
   particleTimeScale: 1, // playback multiplier on every trip's duration
+  particleCount: PARTICLES_PER_FLOW, // per flow; ?tune only — the UI keeps it fixed
   particleFade: 0.1, // fade in/out window at each end, fraction of the trip
   particleArrivalRamp: 1, // alpha climbs with progress: faint leaving, bright landing (0 = flat)
   particleSize: 4,
@@ -252,7 +254,8 @@ export function TerrainPanel({
   source: DataSource
   /**
    * Particles per OD flow, 0 = off — a dashboard-wide choice, so panels stay
-   * comparable. Capped by the global budget (particleBudget.ts).
+   * comparable. Capped by the global budget (particleBudget.ts). The `?tune`
+   * "count" knob replaces the number (never the on/off) for the tuned panel.
    */
   flows: Record<FlowId, number>
   /** Live panel count — splits the global particle budget (particleBudget.ts). */
@@ -483,6 +486,9 @@ export function TerrainPanel({
 
       const pt = g.addFolder('particles')
       pt.add(s, 'particlesOn').name('enabled').onChange(sync)
+      // onFinishChange: a new count rebuilds the layer's GPU buffers, so apply it
+      // once the drag settles rather than on every step.
+      pt.add(s, 'particleCount', 50, 4000, 50).name('count (per flow)').onFinishChange(sync)
       pt.add(s, 'particleSpeed', 100, 2000, 50).name('trip speed (m/s)').onChange(sync)
       pt.add(s, 'particleTimeScale', 0.1, 5, 0.1).name('time scale').onChange(sync)
       pt.add(s, 'particleFade', 0, 0.5, 0.01).name('fade (of trip)').onChange(sync)
@@ -569,7 +575,9 @@ export function TerrainPanel({
               // Each flow is its own particle system, so it takes its own budget share.
               numParticles: perPanelParticleCount(
                 activePanels * activeFlows.length,
-                flows[flow.id],
+                // `flows` only says on/off here (activeFlows); the number is the
+                // tuner's knob, which starts at the dashboard's PARTICLES_PER_FLOW.
+                controls.particleCount,
               ),
               // Same knob as the terrain layer → particles always sit on the surface.
               heightScale: controls.height,
