@@ -12,8 +12,10 @@ void main(void) {
   // Two-lobe sprite: a bright core in the inner half plus a wide, faint halo
   // filling the (doubled) point. Under additive blending the halos of nearby
   // particles stack, so overlaps visibly bloom -- sprite.z tunes the strength.
+  // The core keeps its pixel size whatever the halo scale (sprite.w): it spans
+  // 1/w of the sprite, so its edge sits at 0.5/w of the point coord.
   float dist = length(gl_PointCoord - 0.5);
-  float core = smoothstep(0.25, 0.06, dist);
+  float core = smoothstep(0.5 / particle.sprite.w, 0.12 / particle.sprite.w, dist);
   float falloff = max(1.0 - dist * 2.0, 0.0);
   float halo = falloff * falloff;
   float glow = core + particle.sprite.z * halo * 0.5;

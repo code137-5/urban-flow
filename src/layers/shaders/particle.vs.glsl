@@ -7,7 +7,6 @@
 // terrain mesh).
 
 in vec4 positions; // xy = heightmap UV, z = height [0,1] (-1 = hidden), w = trip progress 0..1
-in vec2 seeds;
 
 out float vAlpha;
 
@@ -22,20 +21,26 @@ void main(void) {
   gl_Position = project_position_to_clipspace(pos, vec3(0.0), vec3(0.0), geometry.position);
   DECKGL_FILTER_GL_POSITION(gl_Position, geometry);
 
-  // Fade in leaving the origin, fade out approaching the destination. Progress
-  // runs 0..1 (lifecycle.x = 1) and the window (lifecycle.w) is a fraction of the
-  // trip. A finished particle parks at progress 1 -- fully faded -- until the CPU
-  // hands it its next trip, so reassignment never pops.
+  // Fade in leaving the origin; NO fade-out (user decision): a particle lands at
+  // full brightness and is gone. Progress runs 0..1 (lifecycle.x = 1) and the
+  // fade-in window (lifecycle.w) is a fraction of the trip. Progress 1 itself is
+  // hidden: that is where a finished slot parks until the CPU hands it its next
+  // trip -- normally the same step, but a slot cleared by TripSchedule.reset()
+  // waits there for the new hour window, and must not sit lit at its destination.
   float fadeIn = smoothstep(0.0, particle.lifecycle.w, positions.w);
-  float fadeOut = 1.0 - smoothstep(particle.lifecycle.x - particle.lifecycle.w,
-                                   particle.lifecycle.x, positions.w);
-  vAlpha = fadeIn * fadeOut * (1.0 - hidden);
+  float fadeOut = 1.0 - step(particle.lifecycle.x, positions.w);
+  // Arrival ramp (lifecycle.z, 0..1): alpha climbs with progress, so a particle
+  // leaves its origin faint and lands bright -- direction reads from a still
+  // frame. 0 keeps the brightness flat after the fade-in. Trail ghosts carry their
+  // own older progress, so the tail comes out fainter than the head for free.
+  float ramp = mix(1.0, positions.w, particle.lifecycle.z);
+  vAlpha = fadeIn * fadeOut * ramp * (1.0 - hidden);
 
-  // Slight per-particle size variation from the static seed. Doubled so the
-  // fragment shader has room for a wide glow halo around the core dot --
-  // overlapping halos accumulate under additive blending.
-  gl_PointSize =
-    particle.sprite.x * (1.0 - 0.5 * particle.sprite.y + particle.sprite.y * seeds.x) * 2.0;
+  // Every particle is the same size -- one dot, one trip. The sprite is the core
+  // dot times the halo scale (sprite.w, 2 by default), so the fragment shader has
+  // room for a wide glow halo; overlapping halos accumulate under additive
+  // blending, which is what makes busy corridors light up.
+  gl_PointSize = particle.sprite.x * particle.sprite.w;
 
   vec4 color = vec4(0.0);
   DECKGL_FILTER_COLOR(color, geometry);

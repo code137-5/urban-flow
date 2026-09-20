@@ -11,11 +11,11 @@ export type ParticleProps = {
   scale: [number, number, number, number]
   /** timeScale (always 1 — TripSchedule bakes it into the durations), unused, unused, dt (s). */
   motion: [number, number, number, number]
-  /** progress end (always 1), simulation time (s), unused, fade window (fraction of a trip). */
+  /** progress end (always 1), simulation time (s), arrival ramp 0–1, fade-in window (fraction of a trip). */
   lifecycle: [number, number, number, number]
   /** Particle color, RGB 0–1 + base alpha. */
   color: [number, number, number, number]
-  /** Point size (px), size variation 0–1, glow strength 0–1, unused. */
+  /** Core dot size (px), unused, glow (halo) strength, halo scale (sprite = core × this). */
   sprite: [number, number, number, number]
 }
 

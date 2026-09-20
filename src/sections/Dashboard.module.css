@@ -15,48 +15,92 @@
   margin-bottom: var(--space-xxl);
 }
 
-/* Toolbar above the panel grid — holds the cross-panel "sync views" toggle,
-   right-aligned. */
+/* Toolbar above the panel grid — two dashboard-wide groups: the block of
+   per-flow rows (switch + that flow's time-of-day window) and the "sync views"
+   toggle. A grid, not a flex row, so the two can re-stack independently as the
+   viewport narrows. */
 .toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  /* The flow block is two rows tall; centering a one-line toggle against it
+     would float it in empty space, so it lines up with the first flow row. */
+  align-items: start;
   gap: var(--space-sm) var(--space-lg);
   margin-bottom: var(--space-md);
 }
 
-/* Particle-flow switches: the swatch is that flow's particle color, so the row
-   doubles as the legend. */
-.flowToggles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-sm) var(--space-lg);
+/* One row per flow: switch · that flow's hour rail · its readout. The three
+   columns are declared HERE and each .flowRow is display: contents, so both
+   rails start and end at exactly the same x even though "Bike trips (따릉이)"
+   and "Living migration (생활이동)" are nowhere near the same width. Capped in
+   width because a 24-step rail stretched across 1920px is all track and no
+   information. */
+.flowRows {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-xs) var(--space-lg);
+  width: 100%;
+  max-width: 900px;
 }
 
+/* The row is a grouping in the markup only; its three cells belong to the grid
+   above so they share its columns. */
+.flowRow {
+  display: contents;
+}
+
+/* Particle-flow switch: the swatch is that flow's particle color, so the row
+   doubles as the legend. */
 .flowSwatch {
   flex: none;
   width: 8px;
   height: 8px;
 }
 
-/* One flow: its toggle, then a particles-per-panel slider and readout. */
-.flowControl {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-sm);
+/* Full 32px row height, so a flow row is --control-height-sm tall — and the
+   switch a proper Carbon target — whatever the rail beside it does. */
+.flowRow .syncToggle {
+  min-height: var(--control-height-sm);
 }
 
-.flowCount {
-  min-width: 4ch;
+/* The rail takes whatever the middle column has: a day needs the length, since
+   at 24 steps a short track leaves the 3 h default window a sliver of fill.
+   min-width: 0 lets the flex row inside shrink with the column. */
+.hourSlider {
+  min-width: 0;
+}
+
+/* "07:00–10:00" — tabular so the thumbs don't shuffle the label sideways. It
+   brightens to --text-primary while this flow's live thumbs are ahead of its
+   committed window, i.e. while the refetch is still pending. */
+.hourValue {
+  min-width: 11ch;
+  text-align: right;
   font: var(--type-caption);
   letter-spacing: 0.32px;
   font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
+  transition: color var(--duration-fast-02) var(--ease-standard);
 }
 
-.slider:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
+.hourPending {
+  color: var(--text-primary);
+}
+
+/* This flow is off (or there is no live OD data): the readout dims with its
+   slider. Last of the three, so it wins over the pending brightening. */
+.hourDisabled {
+  color: var(--text-disabled);
+}
+
+/* Shown only when Supabase env is missing: the hours have nothing to filter.
+   One line under both rows — the cause is the build, not either flow. */
+.hourHint {
+  grid-column: 1 / -1;
+  font: var(--type-caption);
+  letter-spacing: 0.32px;
+  color: var(--text-helper);
 }
 
 /* Carbon-style checkbox row on dark: flat 0px box, 1px hairline, a light fill +
@@ -110,6 +154,72 @@
 .syncCheckbox:disabled {
   border-color: var(--border-subtle);
   cursor: not-allowed;
+}
+
+/* The toolbar-level sync toggle, for grid placement only — it keeps the
+   .syncToggle look. The 32px box centers its one line on the first flow row, so
+   the two groups share a baseline without a hairline fence between them (a
+   vertical rule beside a one-line toggle would only be a 32px stub). */
+.syncViews {
+  justify-self: end;
+  min-height: var(--control-height-sm);
+}
+
+/* Carbon xlg: a flow row already wants ~200px of label + a rail that stays
+   draggable + a 11ch readout, so below this the sync toggle drops to a line of
+   its own under the block and the rails take the whole width. */
+@media (max-width: 1312px) {
+  .toolbar {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .flowRows {
+    max-width: none;
+    /* Tighter column gap: just above 672px the row is at its narrowest and the
+       rail's 180px track is a hard floor — these 24px are the slack that keeps
+       it from overflowing the container. */
+    gap: var(--space-xs) var(--space-sm);
+  }
+  .syncViews {
+    justify-self: start;
+    width: 100%;
+    /* Now that it is its own row, one hairline keeps the flow block and the view
+       option reading as two groups rather than three stacked lines. */
+    padding-top: var(--space-sm);
+    border-top: 1px solid var(--border-subtle);
+  }
+}
+
+/* Carbon md and below: the shared column grid gives out — each flow becomes its
+   own two-line block (switch + readout, then a full-width rail), which lines the
+   rails up by itself since they all span the width. */
+@media (max-width: 672px) {
+  .flowRows {
+    display: flex;
+    flex-direction: column;
+    /* The desktop grid centres its cells; here each row must span the width. */
+    align-items: stretch;
+    gap: var(--space-sm);
+  }
+  .flowRow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-xxs) var(--space-sm);
+  }
+  /* Line 1 = switch + readout, line 2 = the rail: the 180px track needs the full
+     width. Placed explicitly — the rail precedes the readout in the markup, so
+     auto-placement would push the readout onto a third line. */
+  .hourValue {
+    grid-area: 1 / 2;
+  }
+  .hourSlider {
+    grid-area: 2 / 1 / 3 / -1;
+  }
+  /* Hairline so the four lines don't read as one list. */
+  .flowRow + .flowRow {
+    padding-top: var(--space-sm);
+    border-top: 1px solid var(--border-subtle);
+  }
 }
 
 /* Responsive panel grid. `grid-template-columns` is set inline by Dashboard.tsx
@@ -390,7 +500,9 @@
   color: var(--text-secondary);
 }
 
-/* Carbon-flavored range input: 2px track, 14px square thumb, no radius. */
+/* Carbon-flavored single range input: 2px track, 14px square thumb, no radius.
+   Used by TerrainPanel's in-canvas smoothing (σ) slider, which imports this same
+   CSS module — the toolbar's two-thumb slider is ui/RangeSlider instead. */
 .slider {
   -webkit-appearance: none;
   appearance: none;

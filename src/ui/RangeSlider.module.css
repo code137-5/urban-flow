@@ -1,0 +1,116 @@
+/* Two-thumb range slider, Carbon dark: 2px rail, 14px square thumbs, flat 0px
+   corners, no shadow. The selected span is --link (Blue 40) — the same "on"
+   accent as a checked checkbox, and far from both flow colors and the terrain
+   ramp, so it never reads as data. */
+.root {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.bound {
+  flex: none;
+  font: var(--type-caption);
+  letter-spacing: 0.32px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-helper);
+}
+
+/* The track is the whole hit area — a full 32px Carbon target, even though the
+   rail it paints is 2px. `touch-action: none` lets a drag work on touch without
+   the page scrolling out from under it. */
+.track {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 180px;
+  height: var(--control-height-sm);
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+
+/* Inset half a thumb on both ends so thumb centres and rail ends coincide; ALL
+   percentages (fill, ticks, thumbs) are relative to this box. */
+.geometry {
+  position: absolute;
+  inset: 0 7px;
+}
+
+.rail {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  margin-top: -1px;
+  background: var(--border-strong);
+  transition: background var(--duration-fast-02) var(--ease-standard);
+}
+
+.track:hover .rail {
+  background: var(--border-strong-hover);
+}
+
+/* Selected span; left/right set inline. */
+.fill {
+  position: absolute;
+  top: 50%;
+  height: 2px;
+  margin-top: -1px;
+  background: var(--link);
+}
+
+/* Quiet hairline mark under the rail; left set inline. */
+.tick {
+  position: absolute;
+  top: 50%;
+  /* Below the thumb's 14px box, so a thumb parked on a mark never hides it. */
+  margin-top: 9px;
+  width: 1px;
+  height: 4px;
+  background: var(--border-strong);
+}
+
+/* Thumbs are painted, not interactive: the track computes which one a press
+   grabbed, so they must not swallow pointer events. `left` is set inline. */
+.thumb {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  background: var(--text-primary);
+  border: none;
+  border-radius: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Last touched thumb sits on top so its focus ring is not clipped by the other
+   one when the two are adjacent. */
+.thumbActive {
+  z-index: 2;
+}
+
+.thumb:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* :active covers exactly the press-and-hold, so the grabbing cursor needs no
+   extra React state. */
+.track:active {
+  cursor: grabbing;
+}
+
+.disabled {
+  opacity: 0.35;
+}
+
+.disabled .track {
+  cursor: not-allowed;
+}
+
+.disabled .track:hover .rail {
+  background: var(--border-strong);
+}

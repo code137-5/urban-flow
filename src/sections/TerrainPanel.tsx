@@ -11,13 +11,19 @@ import { parkLayer, riverLayer } from '../layers/featureOverlays'
 import { ContourFallback } from './ContourFallback'
 import { terrainShaderSupported } from '../layers/terrainSupport'
 import { particlesSupported } from '../layers/particleSupport'
-import { detectGpuTier, perPanelParticleCount } from '../layers/particleBudget'
+import { PARTICLES_PER_FLOW, detectGpuTier, perPanelParticleCount } from '../layers/particleBudget'
 import { usePanelVisibility } from '../hooks/usePanelVisibility'
 import { shaderErrors, type ShaderError } from '../webgl-compat'
-import { FLOWS, FLOW_BY_ID, odTripSource } from '../data/odTrips'
+import {
+  DEFAULT_SCATTER_SCALE,
+  FLOWS,
+  FLOW_BY_ID,
+  odTripSource,
+  setOdScatterScale,
+} from '../data/odTrips'
 import type { FlowId } from '../data/odTrips'
 import { randomTripSource } from '../data/trips'
-import { TripSchedule, sharedTripSchedule } from '../layers/tripSchedule'
+import { TripSchedule, flushSharedTripSchedules, sharedTripSchedule } from '../layers/tripSchedule'
 import type { DataSource, GeoPoint, Heightmap } from '../data/types'
 import styles from './Dashboard.module.css'
 
@@ -122,9 +128,12 @@ type Controls = {
   particlesOn: boolean
   particleSpeed: number
   particleTimeScale: number
+  particleCount: number
   particleFade: number
+  particleArrivalRamp: number
   particleSize: number
   particleGlow: number
+  particleHalo: number
   particleTrail: number
   particleTrailLength: number
   particleTrailGap: number
@@ -162,16 +171,21 @@ const DEFAULT_CONTROLS: Controls = {
   // this; real OD flows additionally × their `speedScale` (odTrips.ts).
   particleSpeed: 1250,
   particleTimeScale: 1, // playback multiplier on every trip's duration
-  particleFade: 0.1, // fade in/out window at each end, fraction of the trip
-  particleSize: 4,
-  particleGlow: 0.6, // halo strength — overlapping particles bloom additively
-  particleTrail: 0.5, // ghost-afterimage strength (0 = off)
+  particleCount: PARTICLES_PER_FLOW, // per flow; ?tune only — the UI keeps it fixed
+  particleFade: 0.1, // fade-in window leaving the origin, fraction of the trip (no fade-out)
+  particleArrivalRamp: 1, // alpha climbs with progress: faint leaving, bright landing (0 = flat)
+  particleSize: 5,
+  particleGlow: 1.25, // halo strength — overlapping particles bloom additively
+  particleHalo: 4, // sprite ÷ core dot: how far each halo reaches (wider = more overlap)
+  particleTrail: 0.3, // ghost-afterimage strength (0 = off)
   particleTrailLength: 20, // ghost snapshots in the trail (~4 s of path at gap 6)
   particleTrailGap: 6, // sim steps between snapshots (spacing)
   // One color per flow — the only thing telling them apart (defaults in odTrips.ts).
   bikeColor: FLOW_BY_ID.bike.color,
   migrationColor: FLOW_BY_ID.migration.color,
-  particleOpacity: 0.85,
+  // Low on purpose: with wide additive halos, faint sprites let density read as
+  // brightness — busy corridors light up instead of every dot saturating.
+  particleOpacity: 0.4,
 }
 
 // Cap the canvas backing-store resolution: 6 panels at DPR 3 is what actually
@@ -250,7 +264,8 @@ export function TerrainPanel({
   source: DataSource
   /**
    * Particles per OD flow, 0 = off — a dashboard-wide choice, so panels stay
-   * comparable. Capped by the global budget (particleBudget.ts).
+   * comparable. Capped by the global budget (particleBudget.ts). The `?tune`
+   * "count" knob replaces the number (never the on/off) for the tuned panel.
    */
   flows: Record<FlowId, number>
   /** Live panel count — splits the global particle budget (particleBudget.ts). */
@@ -481,17 +496,35 @@ export function TerrainPanel({
 
       const pt = g.addFolder('particles')
       pt.add(s, 'particlesOn').name('enabled').onChange(sync)
+      // onFinishChange: a new count rebuilds the layer's GPU buffers, so apply it
+      // once the drag settles rather than on every step.
+      pt.add(s, 'particleCount', 50, 4000, 50).name('count (per flow)').onFinishChange(sync)
       pt.add(s, 'particleSpeed', 100, 2000, 50).name('trip speed (m/s)').onChange(sync)
       pt.add(s, 'particleTimeScale', 0.1, 5, 0.1).name('time scale').onChange(sync)
-      pt.add(s, 'particleFade', 0, 0.5, 0.01).name('fade (of trip)').onChange(sync)
+      pt.add(s, 'particleFade', 0, 0.5, 0.01).name('fade in (of trip)').onChange(sync)
+      pt.add(s, 'particleArrivalRamp', 0, 1, 0.05).name('arrival ramp').onChange(sync)
       pt.add(s, 'particleSize', 1, 8, 0.5).name('size (px)').onChange(sync)
-      pt.add(s, 'particleGlow', 0, 1, 0.05).name('glow').onChange(sync)
+      // Glow past 1 and a wide halo turn the swarm into a density read: where
+      // particles crowd, their halos stack additively and the corridor lights up.
+      pt.add(s, 'particleGlow', 0, 3, 0.05).name('glow (halo strength)').onChange(sync)
+      pt.add(s, 'particleHalo', 1, 10, 0.5).name('halo size (× dot)').onChange(sync)
       pt.add(s, 'particleTrail', 0, 1, 0.05).name('trail opacity').onChange(sync)
-      pt.add(s, 'particleTrailLength', 1, 50, 1).name('trail length').onChange(sync)
+      pt.add(s, 'particleTrailLength', 1, 120, 1).name('trail length').onChange(sync)
       pt.add(s, 'particleTrailGap', 1, 50, 1).name('trail gap (steps)').onChange(sync)
       pt.addColor(s, 'bikeColor').name('bike color').onChange(sync)
       pt.addColor(s, 'migrationColor').name('migration color').onChange(sync)
       pt.add(s, 'particleOpacity', 0, 1, 0.05).name('opacity').onChange(sync)
+      // Not a Controls field: endpoint scatter is page-wide state in odTrips.ts
+      // (every panel plays the same trips). 0 = endpoints on the dong centroid,
+      // 1 = the default disc. Flushing the prefetched trips applies it within one
+      // trip's length instead of after the pool drains.
+      const od = { scatter: DEFAULT_SCATTER_SCALE }
+      pt.add(od, 'scatter', 0, 2, 0.05)
+        .name('migration scatter (× radius)')
+        .onFinishChange((scale: number) => {
+          if (!setOdScatterScale(scale)) return
+          for (const flow of FLOWS) if (flow.scatter) flushSharedTripSchedules(`${flow.id}|`)
+        })
     })
     return () => {
       cancelled = true
@@ -555,13 +588,17 @@ export function TerrainPanel({
               // Each flow is its own particle system, so it takes its own budget share.
               numParticles: perPanelParticleCount(
                 activePanels * activeFlows.length,
-                flows[flow.id],
+                // `flows` only says on/off here (activeFlows); the number is the
+                // tuner's knob, which starts at the dashboard's PARTICLES_PER_FLOW.
+                controls.particleCount,
               ),
               // Same knob as the terrain layer → particles always sit on the surface.
               heightScale: controls.height,
               fadeFraction: controls.particleFade,
+              arrivalRamp: controls.particleArrivalRamp,
               pointSize: controls.particleSize,
               glow: controls.particleGlow,
+              haloScale: controls.particleHalo,
               trail: controls.particleTrail,
               trailLength: controls.particleTrailLength,
               trailGap: controls.particleTrailGap,
