@@ -3,7 +3,7 @@ import type { DefaultProps, LayerContext, LayerProps, UpdateParameters } from '@
 import { BufferTransform, Model } from '@luma.gl/engine'
 import type { Buffer, Texture } from '@luma.gl/core'
 import type { Heightmap } from '../data/types'
-import { lngLatToUv, mulberry32 } from '../data/trips'
+import { lngLatToUv } from '../data/trips'
 import { computeFlowField } from '../data/flowField'
 import type { FlowField } from '../data/flowField'
 import type { TripSchedule } from './tripSchedule'
@@ -31,8 +31,6 @@ export type ParticleLayerProps = {
   arrivalRamp?: number
   /** Sprite size in pixels. */
   pointSize?: number
-  /** Per-particle size variation, 0–1. */
-  sizeVariation?: number
   /** Halo strength 0–1 — overlapping halos bloom under additive blending. */
   glow?: number
   /** Trail (ghost afterimage) strength 0–1; 0 disables the history draws. */
@@ -57,7 +55,6 @@ const defaultProps: DefaultProps<ParticleLayerProps & Pick<LayerProps, 'paramete
   fadeFraction: { type: 'number', value: 0.1 },
   arrivalRamp: { type: 'number', value: 0 },
   pointSize: { type: 'number', value: 3 },
-  sizeVariation: { type: 'number', value: 0.5 },
   glow: { type: 'number', value: 0.6 },
   trail: { type: 'number', value: 0.7 },
   trailLength: { type: 'number', value: 8 },
@@ -123,7 +120,6 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     history?: Buffer[]
     historyHead: number
     stepCount: number
-    seedBuffer?: Buffer
     /** Static per-slot trip endpoints (UV) and timing; CPU mirrors below. */
     tripBuffer?: Buffer
     timingBuffer?: Buffer
@@ -236,16 +232,12 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     if (token !== this.state.setupToken) return
 
     const { device } = this.context
-    const rand = mulberry32(0x5e0e1) // fixed seed — same sprite sizes in every panel
     const tripData = new Float32Array(numParticles * TRIP_STRIDE)
     const timingData = new Float32Array(numParticles * TIMING_STRIDE)
     const seen = new Uint32Array(numParticles) // 0 = never written; _syncSlots fills them
-    const seeds = new Float32Array(numParticles * 2)
     const positions = new Float32Array(numParticles * 4)
 
     for (let p = 0; p < numParticles; p++) {
-      seeds[p * 2] = rand()
-      seeds[p * 2 + 1] = rand()
       positions[p * 4 + 2] = -1 // hidden until the first transform step lands it
     }
 
@@ -260,7 +252,6 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     const history = Array.from({ length: trailLength }, () =>
       device.createBuffer({ data: positions.slice() }),
     )
-    const seedBuffer = device.createBuffer({ data: seeds })
     const tripBuffer = device.createBuffer({ data: tripData })
     const timingBuffer = device.createBuffer({ data: timingData })
     const flowTexture = this._createFlowTexture(flowField)
@@ -285,19 +276,14 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
       id: this.props.id,
       topology: 'point-list',
       vertexCount: numParticles,
-      bufferLayout: [
-        { name: 'positions', format: 'float32x4' },
-        { name: 'seeds', format: 'float32x2' },
-      ],
+      bufferLayout: [{ name: 'positions', format: 'float32x4' }],
       isInstanced: false,
     })
-    model.setAttributes({ seeds: seedBuffer })
 
     this.state.buffers = buffers
     this.state.history = history
     this.state.historyHead = 0
     this.state.stepCount = 0
-    this.state.seedBuffer = seedBuffer
     this.state.tripBuffer = tripBuffer
     this.state.timingBuffer = timingBuffer
     this.state.tripData = tripData
@@ -421,7 +407,6 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     this.state.model?.destroy()
     this.state.buffers?.forEach((b) => b.destroy())
     this.state.history?.forEach((b) => b.destroy())
-    this.state.seedBuffer?.destroy()
     this.state.tripBuffer?.destroy()
     this.state.timingBuffer?.destroy()
     this.state.flowTexture?.destroy()
@@ -429,7 +414,6 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     this.state.model = undefined
     this.state.buffers = undefined
     this.state.history = undefined
-    this.state.seedBuffer = undefined
     this.state.tripBuffer = undefined
     this.state.timingBuffer = undefined
     this.state.tripData = undefined
@@ -503,7 +487,6 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     const fadeFraction = this.props.fadeFraction!
     const arrivalRamp = this.props.arrivalRamp!
     const pointSize = this.props.pointSize!
-    const sizeVariation = this.props.sizeVariation!
     const glow = this.props.glow!
     const color = this.props.color!
     const zOffset = this.props.zOffset!
@@ -515,7 +498,7 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
       // Progress runs 0..1; the fade window is a fraction of the trip.
       lifecycle: [1, this.state.simTime, arrivalRamp, fadeFraction],
       color: [color[0] / 255, color[1] / 255, color[2] / 255, alphaScale],
-      sprite: [pointSize * sizeScale, sizeVariation, glow, 0],
+      sprite: [pointSize * sizeScale, 0, glow, 0],
     }
   }
 }

@@ -67,7 +67,8 @@ Two deck.gl / luma.gl 9.3 traps in `ParticleLayer` (both were silent bugs):
 Trips are **real OD pairs** from Supabase (`src/data/odTrips.ts`, the only file that knows the
 schema). Two flows (`FLOWS`), drawn **at the same time** as separate color-coded particle
 layers; the dashboard-wide toolbar gives each an on/off toggle (its swatch doubles as the
-legend). Particles are a fixed **200 per flow per panel**. Each flow's toolbar row also
+legend). Particles are a fixed **250 per flow per panel** (`PARTICLES_PER_FLOW`; `?tune` can override
+it), all the same size — no per-particle size variation. Each flow's toolbar row also
 carries its own **time-of-day range slider** (`src/ui/RangeSlider.tsx` — two thumbs, whole
 hours, half-open `[from, to)`, no wrap past midnight, default **07–10**) choosing which
 hours that flow's OD pairs are drawn from — per flow, but the same for every panel:
@@ -75,9 +76,10 @@ hours that flow's OD pairs are drawn from — per flow, but the same for every p
   return_station_no, hour, trips)` rows + `bike_station` coordinates. Near-white.
 - **migration** — living migration (생활이동): `living_migration_hourly` ~1.54M
   `(o_admdong_cd, d_admdong_cd, hour, trips)` rows + `living_migration_adm_dong` centroids
-  (426 dongs). Yellow. Endpoints are scattered around each centroid (radius = half the
-  nearest-centroid distance) so trips between two dongs don't all ride one line; the `?tune`
-  "migration scatter" knob scales that radius (`setOdScatterScale`, 0 = pin to the centroid).
+  (426 dongs). Yellow. Endpoints are pinned to the dong centroid by default
+  (`DEFAULT_SCATTER_SCALE = 0`, a user decision — flows read as clean centroid-to-centroid
+  lines); the `?tune` "migration scatter" knob (`setOdScatterScale`) spreads them over a disc
+  of that × half the nearest-centroid distance.
 
 Pairs are drawn **∝ trips within the selected hour window** server-side by one RPC per flow,
 `sample_*_hourly(n, hour_from, hour_to)` (`supabase/*_hourly_sampling.sql`, run by hand in the

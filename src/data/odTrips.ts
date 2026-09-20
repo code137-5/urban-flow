@@ -139,11 +139,16 @@ export function getOdHourRange(flowId: FlowId): HourRange {
 
 /**
  * Multiplier on every scattered place's disc radius (`OdFlow.scatter`): 1 is the
- * default half-nearest-centroid disc, 0 pins each endpoint to its centroid so all
- * trips between two dongs ride one line. Page-wide like the hour windows — every
- * panel plays the same trips — and a dev knob only (`?tune`).
+ * half-nearest-centroid disc, 0 pins each endpoint to its centroid so all trips
+ * between two dongs ride one line. Page-wide like the hour windows — every panel
+ * plays the same trips — and a dev knob only (`?tune`).
+ *
+ * Default 0 (user decision): dong-to-dong flows read as clean lines between
+ * centroids rather than a haze, and the corridors that carry the most trips
+ * brighten where their particles stack.
  */
-let scatterScale = 1
+export const DEFAULT_SCATTER_SCALE = 0
+let scatterScale = DEFAULT_SCATTER_SCALE
 
 /** Returns true only when the scale actually changed, so the caller knows to flush. */
 export function setOdScatterScale(scale: number): boolean {

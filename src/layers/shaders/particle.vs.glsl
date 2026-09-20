@@ -7,7 +7,6 @@
 // terrain mesh).
 
 in vec4 positions; // xy = heightmap UV, z = height [0,1] (-1 = hidden), w = trip progress 0..1
-in vec2 seeds;
 
 out float vAlpha;
 
@@ -37,11 +36,10 @@ void main(void) {
   float ramp = mix(1.0, positions.w, particle.lifecycle.z);
   vAlpha = fadeIn * fadeOut * ramp * (1.0 - hidden);
 
-  // Slight per-particle size variation from the static seed. Doubled so the
-  // fragment shader has room for a wide glow halo around the core dot --
-  // overlapping halos accumulate under additive blending.
-  gl_PointSize =
-    particle.sprite.x * (1.0 - 0.5 * particle.sprite.y + particle.sprite.y * seeds.x) * 2.0;
+  // Every particle is the same size -- one dot, one trip. Doubled so the fragment
+  // shader has room for a wide glow halo around the core dot; overlapping halos
+  // accumulate under additive blending.
+  gl_PointSize = particle.sprite.x * 2.0;
 
   vec4 color = vec4(0.0);
   DECKGL_FILTER_COLOR(color, geometry);

@@ -14,7 +14,13 @@ import { particlesSupported } from '../layers/particleSupport'
 import { PARTICLES_PER_FLOW, detectGpuTier, perPanelParticleCount } from '../layers/particleBudget'
 import { usePanelVisibility } from '../hooks/usePanelVisibility'
 import { shaderErrors, type ShaderError } from '../webgl-compat'
-import { FLOWS, FLOW_BY_ID, odTripSource, setOdScatterScale } from '../data/odTrips'
+import {
+  DEFAULT_SCATTER_SCALE,
+  FLOWS,
+  FLOW_BY_ID,
+  odTripSource,
+  setOdScatterScale,
+} from '../data/odTrips'
 import type { FlowId } from '../data/odTrips'
 import { randomTripSource } from '../data/trips'
 import { TripSchedule, flushSharedTripSchedules, sharedTripSchedule } from '../layers/tripSchedule'
@@ -167,7 +173,7 @@ const DEFAULT_CONTROLS: Controls = {
   particleCount: PARTICLES_PER_FLOW, // per flow; ?tune only — the UI keeps it fixed
   particleFade: 0.1, // fade in/out window at each end, fraction of the trip
   particleArrivalRamp: 1, // alpha climbs with progress: faint leaving, bright landing (0 = flat)
-  particleSize: 4,
+  particleSize: 5,
   particleGlow: 0.6, // halo strength — overlapping particles bloom additively
   particleTrail: 0.5, // ghost-afterimage strength (0 = off)
   particleTrailLength: 20, // ghost snapshots in the trail (~4 s of path at gap 6)
@@ -175,7 +181,7 @@ const DEFAULT_CONTROLS: Controls = {
   // One color per flow — the only thing telling them apart (defaults in odTrips.ts).
   bikeColor: FLOW_BY_ID.bike.color,
   migrationColor: FLOW_BY_ID.migration.color,
-  particleOpacity: 0.85,
+  particleOpacity: 1,
 }
 
 // Cap the canvas backing-store resolution: 6 panels at DPR 3 is what actually
@@ -505,7 +511,7 @@ export function TerrainPanel({
       // (every panel plays the same trips). 0 = endpoints on the dong centroid,
       // 1 = the default disc. Flushing the prefetched trips applies it within one
       // trip's length instead of after the pool drains.
-      const od = { scatter: 1 }
+      const od = { scatter: DEFAULT_SCATTER_SCALE }
       pt.add(od, 'scatter', 0, 2, 0.05)
         .name('migration scatter (× radius)')
         .onFinishChange((scale: number) => {
