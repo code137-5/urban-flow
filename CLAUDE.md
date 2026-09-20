@@ -76,7 +76,8 @@ hours that flow's OD pairs are drawn from — per flow, but the same for every p
 - **migration** — living migration (생활이동): `living_migration_hourly` ~1.54M
   `(o_admdong_cd, d_admdong_cd, hour, trips)` rows + `living_migration_adm_dong` centroids
   (426 dongs). Yellow. Endpoints are scattered around each centroid (radius = half the
-  nearest-centroid distance) so trips between two dongs don't all ride one line.
+  nearest-centroid distance) so trips between two dongs don't all ride one line; the `?tune`
+  "migration scatter" knob scales that radius (`setOdScatterScale`, 0 = pin to the centroid).
 
 Pairs are drawn **∝ trips within the selected hour window** server-side by one RPC per flow,
 `sample_*_hourly(n, hour_from, hour_to)` (`supabase/*_hourly_sampling.sql`, run by hand in the

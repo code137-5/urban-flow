@@ -14,10 +14,10 @@ import { particlesSupported } from '../layers/particleSupport'
 import { detectGpuTier, perPanelParticleCount } from '../layers/particleBudget'
 import { usePanelVisibility } from '../hooks/usePanelVisibility'
 import { shaderErrors, type ShaderError } from '../webgl-compat'
-import { FLOWS, FLOW_BY_ID, odTripSource } from '../data/odTrips'
+import { FLOWS, FLOW_BY_ID, odTripSource, setOdScatterScale } from '../data/odTrips'
 import type { FlowId } from '../data/odTrips'
 import { randomTripSource } from '../data/trips'
-import { TripSchedule, sharedTripSchedule } from '../layers/tripSchedule'
+import { TripSchedule, flushSharedTripSchedules, sharedTripSchedule } from '../layers/tripSchedule'
 import type { DataSource, GeoPoint, Heightmap } from '../data/types'
 import styles from './Dashboard.module.css'
 
@@ -492,6 +492,17 @@ export function TerrainPanel({
       pt.addColor(s, 'bikeColor').name('bike color').onChange(sync)
       pt.addColor(s, 'migrationColor').name('migration color').onChange(sync)
       pt.add(s, 'particleOpacity', 0, 1, 0.05).name('opacity').onChange(sync)
+      // Not a Controls field: endpoint scatter is page-wide state in odTrips.ts
+      // (every panel plays the same trips). 0 = endpoints on the dong centroid,
+      // 1 = the default disc. Flushing the prefetched trips applies it within one
+      // trip's length instead of after the pool drains.
+      const od = { scatter: 1 }
+      pt.add(od, 'scatter', 0, 2, 0.05)
+        .name('migration scatter (× radius)')
+        .onFinishChange((scale: number) => {
+          if (!setOdScatterScale(scale)) return
+          for (const flow of FLOWS) if (flow.scatter) flushSharedTripSchedules(`${flow.id}|`)
+        })
     })
     return () => {
       cancelled = true

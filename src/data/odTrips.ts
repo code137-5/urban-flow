@@ -138,6 +138,22 @@ export function getOdHourRange(flowId: FlowId): HourRange {
 }
 
 /**
+ * Multiplier on every scattered place's disc radius (`OdFlow.scatter`): 1 is the
+ * default half-nearest-centroid disc, 0 pins each endpoint to its centroid so all
+ * trips between two dongs ride one line. Page-wide like the hour windows — every
+ * panel plays the same trips — and a dev knob only (`?tune`).
+ */
+let scatterScale = 1
+
+/** Returns true only when the scale actually changed, so the caller knows to flush. */
+export function setOdScatterScale(scale: number): boolean {
+  const next = Math.max(0, scale)
+  if (next === scatterScale) return false
+  scatterScale = next
+  return true
+}
+
+/**
  * Whether this build has Supabase credentials at all. False only when the
  * `VITE_SUPABASE_*` env vars are missing — it says nothing about whether the
  * tables answer, which is what the console status line reports.
@@ -425,8 +441,9 @@ export function odTripSource(flow: OdFlow, opts: OdTripOptions = {}): TripSource
 
   /** A point for this endpoint: the place itself, or uniform in its disc. */
   const locate = (place: Place): [number, number] => {
-    if (place.radius <= 0) return place.center
-    const r = place.radius * Math.sqrt(rand())
+    const radius = place.radius * scatterScale
+    if (radius <= 0) return place.center
+    const r = radius * Math.sqrt(rand())
     const a = rand() * 2 * Math.PI
     const [lng, lat] = offsetMeters(place.center, r * Math.cos(a), r * Math.sin(a))
     return [Math.min(maxLng, Math.max(minLng, lng)), Math.min(maxLat, Math.max(minLat, lat))]
