@@ -29,7 +29,13 @@ void main(void) {
   float fadeIn = smoothstep(0.0, particle.lifecycle.w, positions.w);
   float fadeOut = 1.0 - smoothstep(particle.lifecycle.x - particle.lifecycle.w,
                                    particle.lifecycle.x, positions.w);
-  vAlpha = fadeIn * fadeOut * (1.0 - hidden);
+  // Arrival ramp (lifecycle.z, 0..1): alpha climbs with progress, so a particle
+  // leaves its origin faint and lands bright -- direction reads from a still
+  // frame. 0 keeps the flat, symmetric fade. The short fade-out stays on top so a
+  // landed particle still never pops. Trail ghosts carry their own older progress,
+  // so the tail comes out fainter than the head for free.
+  float ramp = mix(1.0, positions.w, particle.lifecycle.z);
+  vAlpha = fadeIn * fadeOut * ramp * (1.0 - hidden);
 
   // Slight per-particle size variation from the static seed. Doubled so the
   // fragment shader has room for a wide glow halo around the core dot --

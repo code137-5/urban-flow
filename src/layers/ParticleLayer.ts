@@ -27,6 +27,8 @@ export type ParticleLayerProps = {
   heightScale?: number
   /** Fade-in/out window at each end of a trip, as a fraction of the trip (0–0.5). */
   fadeFraction?: number
+  /** 0–1: how much alpha climbs with trip progress (faint at the origin, full at the destination). */
+  arrivalRamp?: number
   /** Sprite size in pixels. */
   pointSize?: number
   /** Per-particle size variation, 0–1. */
@@ -53,6 +55,7 @@ const defaultProps: DefaultProps<ParticleLayerProps & Pick<LayerProps, 'paramete
   numParticles: { type: 'number', value: 1000 },
   heightScale: { type: 'number', value: 4000 },
   fadeFraction: { type: 'number', value: 0.1 },
+  arrivalRamp: { type: 'number', value: 0 },
   pointSize: { type: 'number', value: 3 },
   sizeVariation: { type: 'number', value: 0.5 },
   glow: { type: 'number', value: 0.6 },
@@ -498,6 +501,7 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     const [minLng, minLat, maxLng, maxLat] = heightmap.bounds
     const heightScale = this.props.heightScale!
     const fadeFraction = this.props.fadeFraction!
+    const arrivalRamp = this.props.arrivalRamp!
     const pointSize = this.props.pointSize!
     const sizeVariation = this.props.sizeVariation!
     const glow = this.props.glow!
@@ -509,7 +513,7 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
       // x = timeScale: 1, because the schedule's durations are already playback seconds.
       motion: [1, 0, 0, dt],
       // Progress runs 0..1; the fade window is a fraction of the trip.
-      lifecycle: [1, this.state.simTime, 0, fadeFraction],
+      lifecycle: [1, this.state.simTime, arrivalRamp, fadeFraction],
       color: [color[0] / 255, color[1] / 255, color[2] / 255, alphaScale],
       sprite: [pointSize * sizeScale, sizeVariation, glow, 0],
     }

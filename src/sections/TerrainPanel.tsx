@@ -123,6 +123,7 @@ type Controls = {
   particleSpeed: number
   particleTimeScale: number
   particleFade: number
+  particleArrivalRamp: number
   particleSize: number
   particleGlow: number
   particleTrail: number
@@ -163,6 +164,7 @@ const DEFAULT_CONTROLS: Controls = {
   particleSpeed: 1250,
   particleTimeScale: 1, // playback multiplier on every trip's duration
   particleFade: 0.1, // fade in/out window at each end, fraction of the trip
+  particleArrivalRamp: 1, // alpha climbs with progress: faint leaving, bright landing (0 = flat)
   particleSize: 4,
   particleGlow: 0.6, // halo strength — overlapping particles bloom additively
   particleTrail: 0.5, // ghost-afterimage strength (0 = off)
@@ -484,6 +486,7 @@ export function TerrainPanel({
       pt.add(s, 'particleSpeed', 100, 2000, 50).name('trip speed (m/s)').onChange(sync)
       pt.add(s, 'particleTimeScale', 0.1, 5, 0.1).name('time scale').onChange(sync)
       pt.add(s, 'particleFade', 0, 0.5, 0.01).name('fade (of trip)').onChange(sync)
+      pt.add(s, 'particleArrivalRamp', 0, 1, 0.05).name('arrival ramp').onChange(sync)
       pt.add(s, 'particleSize', 1, 8, 0.5).name('size (px)').onChange(sync)
       pt.add(s, 'particleGlow', 0, 1, 0.05).name('glow').onChange(sync)
       pt.add(s, 'particleTrail', 0, 1, 0.05).name('trail opacity').onChange(sync)
@@ -571,6 +574,7 @@ export function TerrainPanel({
               // Same knob as the terrain layer → particles always sit on the surface.
               heightScale: controls.height,
               fadeFraction: controls.particleFade,
+              arrivalRamp: controls.particleArrivalRamp,
               pointSize: controls.particleSize,
               glow: controls.particleGlow,
               trail: controls.particleTrail,
