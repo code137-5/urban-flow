@@ -90,9 +90,11 @@ window)** — LRU of 6 windows, places paginated once per flow, one 60 s rotatin
 per flow — so request volume does not grow with panel count. **Each flow's hour window is
 page-wide module state in `odTrips.ts` (`setOdHourRange(flowId, …)`) and deliberately NOT
 part of the `sharedTripSchedule` key**: re-keying would tear down every `ParticleLayer` and
-blank the swarm. Instead the dashboard calls `flushSharedTripSchedules('<flow>|')`, which
-drops only that flow's prefetched trips — particles in flight finish their trip and the next ones come from the new
-hours. Duration = distance / the panel's speed knob ×
+rebuild its GPU state. Instead the dashboard calls `resetSharedTripSchedules('<flow>|')`
+(`TripSchedule.reset`, a user decision): that flow's particles are parked hidden, its trail
+rings wiped (`epoch`) and its prefetched trips dropped, then the swarm re-forms from the new
+hours with staggered departures — the screen never mixes two windows. (`flush()`, which lets
+trips in flight finish, remains for the `?tune` scatter knob.) Duration = distance / the panel's speed knob ×
 the flow's `speedScale` — there is no travel-time data. Needs `VITE_SUPABASE_URL` /
 `VITE_SUPABASE_ANON_KEY` (`.env.local`, and Vercel env); without them, or on any failure, the
 default-on flow falls back to `randomTripSource` and the other just doesn't draw. Only living

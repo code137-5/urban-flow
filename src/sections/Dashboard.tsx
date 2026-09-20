@@ -6,7 +6,7 @@ import type { DatasetId } from '../data/types'
 import { DEFAULT_HOUR_RANGE, FLOWS, odConfigured, setOdHourRange } from '../data/odTrips'
 import type { FlowId } from '../data/odTrips'
 import { PARTICLES_PER_FLOW } from '../layers/particleBudget'
-import { flushSharedTripSchedules } from '../layers/tripSchedule'
+import { resetSharedTripSchedules } from '../layers/tripSchedule'
 import { RangeSlider } from '../ui/RangeSlider'
 import { TerrainPanel } from './TerrainPanel'
 import type { PanelCamera } from './TerrainPanel'
@@ -128,19 +128,20 @@ export function Dashboard() {
     return () => clearTimeout(id)
   }, [hourRanges])
   // The windows are page-wide module state inside odTrips.ts — deliberately NOT a
-  // TerrainPanel prop and NOT part of the shared-schedule key. Re-keying the
-  // schedules would rebuild every ParticleLayer and blank the swarm on each
-  // change; flushing the prefetch pools instead lets the trips in flight land
-  // normally and only the ones after them come from the new hours. The keys are
-  // `${flow}|${speed}|${timeScale}`, so the `${flow.id}|` prefix flushes exactly
+  // TerrainPanel prop and NOT part of the shared-schedule key: re-keying would
+  // rebuild every ParticleLayer's GPU state on each change. A new window instead
+  // resets the flow's schedules in place (user decision): its particles and their
+  // trails are cleared at once and the swarm re-forms from the new hours, so what
+  // is on screen never mixes two windows. The keys are
+  // `${flow}|${speed}|${timeScale}`, so the `${flow.id}|` prefix resets exactly
   // the schedules that just changed window — moving the bike thumbs must not
-  // refetch living migration. Seeding the state from DEFAULT_HOUR_RANGE makes
-  // `setOdHourRange` a no-op on mount, so nothing is flushed until the user
+  // clear or refetch living migration. Seeding the state from DEFAULT_HOUR_RANGE makes
+  // `setOdHourRange` a no-op on mount, so nothing is reset until the user
   // actually moves a thumb.
   useEffect(() => {
     for (const flow of FLOWS) {
       const [from, to] = committedHours[flow.id]
-      if (setOdHourRange(flow.id, from, to)) flushSharedTripSchedules(`${flow.id}|`)
+      if (setOdHourRange(flow.id, from, to)) resetSharedTripSchedules(`${flow.id}|`)
     }
   }, [committedHours])
 
