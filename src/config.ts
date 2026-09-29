@@ -5,13 +5,11 @@ import type { MapViewState } from '@deck.gl/core'
 export { SEOUL_BOUNDS } from './data/bounds'
 import { SEOUL_BOUNDS } from './data/bounds'
 
-/**
- * CARTO dark-matter basemap style. Currently unused — we render on a plain dark
- * background, no basemap. Kept in case a faint geographic reference is wanted later
- * (re-add react-map-gl/maplibre <Map> in the dashboard view).
- */
-export const BASEMAP_STYLE =
-  'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
+// There is no basemap by design: deck.gl draws straight onto the plain --bg
+// canvas so the visualization is one continuous dark surface with the site
+// chrome. The geographic reference comes from the Seoul boundary, park and
+// river overlays (src/layers/), not from map tiles — so no map library is a
+// dependency of this project.
 
 /** Initial camera over Seoul: high pitch for the "contour poster" look. */
 export const INITIAL_VIEW_STATE: MapViewState = {
