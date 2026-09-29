@@ -53,8 +53,14 @@ export class TripSchedule {
         const trip: Trip | null = this.queue.take() ?? last
         if (!trip) break
         last = trip
-        // Random head start so new slots don't all depart at once.
-        this.assign(p, trip, this.clock - this.rand() * this.playbackSeconds(trip))
+        // Spread the departures so new slots don't all leave at once. The first
+        // swarm gets a head start (the page opens on traffic already under way);
+        // slots added to a swarm that exists — the particle count grew with the
+        // hour window — leave from their origins over the coming trip-length,
+        // like the slots `reset()` re-forms beside them, rather than popping up
+        // mid-route.
+        const spread = this.rand() * this.playbackSeconds(trip)
+        this.assign(p, trip, from === 0 ? this.clock - spread : this.clock + spread)
       }
     })
     return this.growing

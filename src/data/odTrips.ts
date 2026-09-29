@@ -65,6 +65,20 @@ export interface OdFlow {
    */
   sampleRpc: string
   /**
+   * `(hour int, total numeric)`, 24 rows: the weight of each hour — the very
+   * totals `sampleRpc` draws against, so the particle count and the OD mix can
+   * never disagree about what a window contains.
+   */
+  totalsTable: string
+  /**
+   * How many trips one particle stands for. Per flow, because the two datasets
+   * count in different units (bike = accumulated rentals, migration = estimated
+   * people) — the defaults are tuned so the 07–10 window draws ~400 of each.
+   */
+  tripsPerParticle: number
+  /** What the totals count, for the toolbar legend: "1 particle ≈ 15,000 <unit>". */
+  tripUnit: string
+  /**
    * Places are area centroids, not points: scatter each endpoint around its
    * centroid so trips between two dongs don't all ride one identical line.
    */
@@ -88,6 +102,9 @@ export const FLOWS: readonly OdFlow[] = [
     placeTable: 'bike_station',
     placeId: 'station_no',
     sampleRpc: 'sample_bike_od_hourly',
+    totalsTable: 'bike_od_hourly_totals',
+    tripsPerParticle: 15_000,
+    tripUnit: 'trips',
     scatter: false,
     speedScale: 0.6,
     minDistanceMeters: 300,
@@ -100,6 +117,9 @@ export const FLOWS: readonly OdFlow[] = [
     placeTable: 'living_migration_adm_dong',
     placeId: 'admdong_cd',
     sampleRpc: 'sample_living_migration_hourly',
+    totalsTable: 'living_migration_hourly_totals',
+    tripsPerParticle: 8_000,
+    tripUnit: 'trips',
     scatter: true,
     speedScale: 0.6,
     minDistanceMeters: 300,
@@ -243,6 +263,8 @@ interface FlowState {
   range: HourRange
   /** Endpoint coordinates — hour-independent, so paginated once and reused. */
   places: Promise<Places> | null
+  /** Trips per hour of day (length 24), fetched once; resolves null when unavailable. */
+  totals: Promise<number[] | null> | null
   /** Reservoir per hour window, keyed `${from}-${to}`, used as an LRU. */
   reservoirs: Map<string, Promise<Leg[] | null>>
   /** The most recent reservoir that actually loaded — what a failed window falls back to. */
@@ -267,6 +289,7 @@ function stateFor(flowId: FlowId): FlowState {
     state = {
       range: DEFAULT_HOUR_RANGE,
       places: null,
+      totals: null,
       reservoirs: new Map(),
       live: null,
       timer: null,
@@ -298,6 +321,68 @@ function placesFor(state: FlowState, client: SupabaseClient, flow: OdFlow): Prom
     })
   }
   return state.places
+}
+
+/**
+ * Trips per hour of day for one flow — 24 numbers, one request per flow per page
+ * load. Never rejects: `null` means the count can't be derived (no Supabase env,
+ * the view is unreadable, or it answered empty) and the caller keeps its fixed
+ * fallback count. A failure is not cached, so a later call retries.
+ */
+export function loadOdHourTotals(flowId: FlowId): Promise<number[] | null> {
+  const state = stateFor(flowId)
+  if (!state.totals) {
+    const flow = FLOW_BY_ID[flowId]
+    const loading: Promise<number[] | null> = (async () => {
+      // Off the synchronous path, so a failure's `state.totals = null` always
+      // lands after the assignment below and the next call retries.
+      await Promise.resolve()
+      try {
+        const client = await getSupabase()
+        if (!client) return null
+        const { data, error } = await client.from(flow.totalsTable).select('hour, total')
+        if (error) throw error
+        const totals = new Array<number>(24).fill(0)
+        let any = false
+        for (const { hour, total } of data as unknown as { hour: number; total: number }[]) {
+          if (hour >= 0 && hour < 24 && total > 0) {
+            totals[hour] = Number(total)
+            any = true
+          }
+        }
+        if (!any) throw new Error(`${flow.totalsTable} returned no rows (grant / RLS?)`)
+        return totals
+      } catch (err) {
+        console.debug(`[urban-flow] Supabase (${flow.id}): hour totals unavailable —`, err)
+        state.totals = null
+        return null
+      }
+    })()
+    state.totals = loading
+  }
+  return state.totals
+}
+
+/** Trips inside the half-open window — the sum of its hours. */
+export function tripsInWindow(totals: readonly number[], range: HourRange): number {
+  let sum = 0
+  for (let h = range[0]; h < range[1]; h++) sum += totals[h] ?? 0
+  return sum
+}
+
+/**
+ * Particles for a window at "one particle = `tripsPerParticle` trips". At least
+ * one while the window has any trips at all, so a quiet hour reads as quiet
+ * rather than as a flow that failed to load.
+ */
+export function particlesForWindow(
+  totals: readonly number[],
+  range: HourRange,
+  tripsPerParticle: number,
+): number {
+  const trips = tripsInWindow(totals, range)
+  if (trips <= 0) return 0
+  return Math.max(1, Math.round(trips / Math.max(1, tripsPerParticle)))
 }
 
 /**

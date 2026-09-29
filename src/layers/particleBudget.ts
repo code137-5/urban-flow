@@ -24,10 +24,13 @@ export function detectGpuTier(): GpuTier {
 }
 
 /**
- * Particles per flow per panel — fixed in the UI, now that the toolbar spends its
- * sliders on the time-of-day windows. The worst case (6 panels × 2 flows × 400 =
- * 4,800) sits far inside the global budget below. The `?tune` panel can override
- * it for the panel it drives; `perPanelParticleCount` still clamps the result.
+ * Fallback particles per flow per panel. The real count is the trips in the
+ * flow's hour window ÷ its trips-per-particle (Dashboard / odTrips.ts); this is
+ * what draws until the hour totals arrive, and for good without Supabase. The
+ * default trips-per-particle are tuned to give about this many at 07–10, so the
+ * hand-over is invisible. A full-day window asks for ~1,900 per flow, which the
+ * desktop share still covers at 6 panels × 2 flows (24,000 / 12 = 2,000); on
+ * mobile `perPanelParticleCount` clamps wide windows.
  */
 export const PARTICLES_PER_FLOW = 400
 

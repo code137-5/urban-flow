@@ -24,6 +24,7 @@
 //   panels    grow to three panels, analyze each canvas
 //   perflow   moving one flow's window must not re-query the other
 //   bike      switch the bike flow on, analyze the canvas
+//   volume    particle count must follow the trips in the hour window
 //   tune      drive the `?tune` knobs; --preset defaults|count|scatter|ramp|trend
 //
 // Screenshots land in .preview/ (gitignored). Every phase prints JSON to stdout.
@@ -35,7 +36,7 @@ import zlib from 'node:zlib'
 
 /* ---------------------------------------------------------------- options */
 
-const PHASES = ['layout', 'overflow', 'state', 'keys', 'pointer', 'disabled', 'noblank', 'panels', 'perflow', 'bike', 'tune']
+const PHASES = ['layout', 'overflow', 'state', 'keys', 'pointer', 'disabled', 'noblank', 'panels', 'perflow', 'bike', 'volume', 'tune']
 
 const argv = process.argv.slice(2)
 const phase = argv.find((a) => !a.startsWith('-')) ?? 'layout'
@@ -293,6 +294,27 @@ const readAria = (page, flow) =>
       rootClass: root?.className ?? null,
     }
   }, { prefix: FLOW_LABEL[flow], row: rowIndex(flow) })
+
+/**
+ * Move one flow's window to [from, to) by keyboard. End thumb out to 24 first, so
+ * the min-gap never blocks the start thumb on its way up.
+ */
+async function setWindow(page, flow, from, to) {
+  await thumb(page, flow, 'end').focus()
+  await page.keyboard.press('End')
+  await thumb(page, flow, 'start').focus()
+  await page.keyboard.press('Home')
+  for (let i = 0; i < from; i++) await page.keyboard.press('ArrowRight')
+  await thumb(page, flow, 'end').focus()
+  for (let i = 24; i > to; i--) await page.keyboard.press('ArrowLeft')
+}
+
+/** The toolbar legend of one flow: its text and the particle count it resolved to. */
+const readScale = (page, flow) =>
+  page.evaluate((id) => {
+    const e = document.querySelector(`#dashboard span[class*="flowScale"][data-flow="${id}"]`)
+    return e ? { text: e.textContent, particles: Number(e.getAttribute('data-particles')) } : null
+  }, flow)
 
 /** Rail geometry of one flow's slider, in page coordinates, for pointer work. */
 const railBox = (page, flow) =>
@@ -623,16 +645,40 @@ try {
     await ctx.close()
   }
 
+  if (phase === 'volume') {
+    // Particles = trips in the window ÷ trips per particle, so a quiet window
+    // must draw visibly fewer than a peak one. `particles` is the count the
+    // dashboard resolved; the pixel census says whether the canvas agrees.
+    const { ctx, page, console_, pageerrors } = await boot(browser, { width: 1440 })
+    if (FLOW === 'bike') await page.locator(SEL.checks).nth(rowIndex('bike')).check()
+    await waitForSwarm(page, console_, { flow: FLOW })
+    const canvas = page.locator(SEL.canvas).first()
+    for (const [from, to] of [[2, 5], [7, 10], [17, 20], [0, 24]]) {
+      await setWindow(page, FLOW, from, to)
+      // Debounced commit + reservoir fetch + the swarm re-forming with
+      // staggered departures.
+      await page.waitForTimeout(14000)
+      const name = `volume-${FLOW}-${String(from).padStart(2, '0')}-${String(to).padStart(2, '0')}`
+      const f = path.join(OUT, `${name}.png`)
+      await canvas.screenshot({ path: f })
+      log(J({ window: `${from}-${to}`, scale: await readScale(page, FLOW), pixels: analyze(f) }))
+    }
+    log('CONSOLE', J(console_.filter(noise)))
+    log('PAGEERRORS', J(pageerrors))
+    await ctx.close()
+  }
+
   if (phase === 'tune') {
     // Each preset is a knob set applied to a flat 2D view, screenshotted before
     // and after so the two reads sit side by side.
     const PRESETS = {
       defaults: null, // read the shipped values back instead of setting any
-      count: [['count (per flow)', 1500]],
+      // Fewer trips per particle = more particles (8,000 → 2,000 is 4×).
+      count: [['migration trips / particle', 2000]],
       scatter: [['migration scatter', 0]],
       ramp: [['arrival ramp', 0]],
       trend: [
-        ['count (per flow)', 1500], ['glow (halo strength)', 1.5], ['halo size (× dot)', 5],
+        ['migration trips / particle', 2000], ['glow (halo strength)', 1.5], ['halo size (× dot)', 5],
         ['trail length', 40], ['trail opacity', 0.3], ['opacity', 0.12],
       ],
     }
@@ -669,8 +715,9 @@ try {
       await canvas.scrollIntoViewIfNeeded()
       await grab(`${preset}-after`)
     }
+    log('scale', J({ bike: await readScale(page, 'bike'), migration: await readScale(page, 'migration') }))
     log('knobs', J(await readKnobs(page, [
-      'count (per flow)', 'size (px)', 'glow (halo strength)', 'halo size (× dot)',
+      'bike trips / particle', 'migration trips / particle', 'size (px)', 'glow (halo strength)', 'halo size (× dot)',
       'trail length', 'trail opacity', 'arrival ramp', 'migration scatter',
     ])))
     log('opacity [contours, boundary, park, river, particles]', J(await readOpacities(page)))

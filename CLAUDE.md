@@ -35,7 +35,7 @@ No test runner. Verify each increment **visually**: with `npm run dev` running, 
 `npm run shot -- <phase>` (Playwright + SwiftShader; screenshots and a JSON report land in
 the gitignored `.preview/`). This is the project's verification loop, not unit tests.
 Phases: `layout` `overflow` `state` `keys` `pointer` `disabled` `noblank` `panels` `perflow`
-`bike` `tune` — plus `--flow bike|migration`, `--width N`, `--preset` for `tune`. It carries
+`bike` `volume` `tune` — plus `--flow bike|migration`, `--width N`, `--preset` for `tune`. It carries
 the fixtures that are tedious to rebuild: a PNG→RGBA `analyze()` that counts particle pixels
 per flow, a `boot()` capturing console / pageerror / failed-request / Supabase-RPC channels,
 and `[class*=]` selectors for the hashed CSS Module classnames. **Add a phase there** rather
@@ -74,8 +74,19 @@ Two deck.gl / luma.gl 9.3 traps in `ParticleLayer` (both were silent bugs):
 Trips are **real OD pairs** from Supabase (`src/data/odTrips.ts`, the only file that knows the
 schema). Two flows (`FLOWS`), drawn **at the same time** as separate color-coded particle
 layers; the dashboard-wide toolbar gives each an on/off toggle (its swatch doubles as the
-legend). Particles are a fixed **400 per flow per panel** (`PARTICLES_PER_FLOW`; `?tune` can override
-it), all the same size — no per-particle size variation. Each flow's toolbar row also
+legend). The **particle count is ∝ the trips in the flow's hour window** (a user decision):
+`particles = sum of the window's hourly totals ÷ tripsPerParticle`, so 02–05 draws ~30 and
+00–24 ~1,900 where 07–10 draws ~400. `tripsPerParticle` is **per flow** (`FLOWS`: bike
+15,000, migration 8,000 — the datasets count in different units, and these defaults give
+~400 each at 07–10); the `?tune` "… trips / particle" knobs move it page-wide, and each
+toolbar row states it ("1 particle ≈ 8,000 trips"). The totals are the same 24-row
+`*_hourly_totals` views the sampling RPCs weight by, read once per flow
+(`loadOdHourTotals`). Until they load — and for good without Supabase — the count is the
+fallback `PARTICLES_PER_FLOW` (400). A count change rebuilds each `ParticleLayer`'s buffers;
+that is acceptable only because it arrives with the hour-change reset, which has already
+cleared the swarm (the count follows the *committed* hours, never the live thumbs). Slots
+added to an existing swarm depart staggered from their origins (`TripSchedule.ensure`).
+Particles are all the same size — no per-particle size variation. Each flow's toolbar row also
 carries its own **time-of-day range slider** (`src/ui/RangeSlider.tsx` — two thumbs, whole
 hours, half-open `[from, to)`, no wrap past midnight, default **07–10**) choosing which
 hours that flow's OD pairs are drawn from — per flow, but the same for every panel:

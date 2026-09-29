@@ -1,9 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Container, Section, Eyebrow } from '../ui/layout'
 import { DEFAULT_SOURCE, SOURCES, getSource } from '../data/sources'
 import type { DatasetId } from '../data/types'
-import { DEFAULT_HOUR_RANGE, FLOWS, odConfigured, setOdHourRange } from '../data/odTrips'
+import {
+  DEFAULT_HOUR_RANGE,
+  FLOWS,
+  loadOdHourTotals,
+  odConfigured,
+  particlesForWindow,
+  setOdHourRange,
+} from '../data/odTrips'
 import type { FlowId } from '../data/odTrips'
 import { PARTICLES_PER_FLOW } from '../layers/particleBudget'
 import { resetSharedTripSchedules } from '../layers/tripSchedule'
@@ -31,6 +38,15 @@ const MAX_PANELS = 6
 const DEFAULT_FLOWS_ON = Object.fromEntries(FLOWS.map((f) => [f.id, f.defaultOn])) as Record<
   FlowId,
   boolean
+>
+
+const DEFAULT_TRIPS_PER_PARTICLE = Object.fromEntries(
+  FLOWS.map((f) => [f.id, f.tripsPerParticle]),
+) as Record<FlowId, number>
+
+const NO_TOTALS = Object.fromEntries(FLOWS.map((f) => [f.id, null])) as Record<
+  FlowId,
+  number[] | null
 >
 
 /** Debounce on the hour thumbs: each committed change refetches that flow's reservoir. */
@@ -105,17 +121,8 @@ export function Dashboard() {
   // comparisons line up out of the box. The toggle stays disabled until a second
   // panel exists (nothing to sync with one panel).
   const [linked, setLinked] = useState(true)
-  // Particle flows drawn in every panel, each its own color. TerrainPanel takes a
-  // count per flow, where 0 means "off" — the count itself is fixed now, so the
-  // toggles are all that move it.
+  // Particle flows drawn in every panel, each its own color.
   const [flowsOn, setFlowsOn] = useState<Record<FlowId, boolean>>(DEFAULT_FLOWS_ON)
-  const flows = useMemo<Record<FlowId, number>>(
-    () => ({
-      bike: flowsOn.bike ? PARTICLES_PER_FLOW : 0,
-      migration: flowsOn.migration ? PARTICLES_PER_FLOW : 0,
-    }),
-    [flowsOn],
-  )
 
   // One time-of-day window per flow, half-open [from, to) in whole hours.
   // `hourRanges` tracks the thumbs live; `committedHours` follows once the drag
@@ -127,6 +134,53 @@ export function Dashboard() {
     const id = setTimeout(() => setCommittedHours(hourRanges), HOUR_COMMIT_MS)
     return () => clearTimeout(id)
   }, [hourRanges])
+
+  // Trips per hour of day, per flow — 24 numbers each, fetched the first time the
+  // flow is switched on. null = not loaded, or Supabase can't supply them.
+  const [hourTotals, setHourTotals] = useState(NO_TOTALS)
+  useEffect(() => {
+    let alive = true
+    for (const flow of FLOWS) {
+      if (!flowsOn[flow.id]) continue
+      void loadOdHourTotals(flow.id).then((totals) => {
+        if (alive && totals) setHourTotals((prev) => ({ ...prev, [flow.id]: totals }))
+      })
+    }
+    return () => {
+      alive = false
+    }
+  }, [flowsOn])
+
+  // How many trips one particle stands for — per flow, page-wide. Only the `?tune`
+  // knobs move it; visitors read it off the toolbar legend.
+  const [tripsPerParticle, setTripsPerParticle] = useState(DEFAULT_TRIPS_PER_PARTICLE)
+  const changeTripsPerParticle = useCallback(
+    (flowId: FlowId, value: number) =>
+      setTripsPerParticle((prev) => (prev[flowId] === value ? prev : { ...prev, [flowId]: value })),
+    [],
+  )
+
+  // Particles per flow, 0 = off: the trips in that flow's window ÷ its trips per
+  // particle, so a quiet window looks quiet. It follows the COMMITTED hours — the
+  // count changes in the same beat as the schedule reset below clears the swarm,
+  // never mid-drag. Until the totals arrive (and for good without Supabase) it is
+  // the fixed fallback, which the default trips-per-particle are tuned to match at
+  // the opening 07–10 window.
+  const flows = useMemo(
+    () =>
+      Object.fromEntries(
+        FLOWS.map((flow) => {
+          const totals = hourTotals[flow.id]
+          const count = !flowsOn[flow.id]
+            ? 0
+            : totals
+              ? particlesForWindow(totals, committedHours[flow.id], tripsPerParticle[flow.id])
+              : PARTICLES_PER_FLOW
+          return [flow.id, count]
+        }),
+      ) as Record<FlowId, number>,
+    [flowsOn, hourTotals, committedHours, tripsPerParticle],
+  )
   // The windows are page-wide module state inside odTrips.ts — deliberately NOT a
   // TerrainPanel prop and NOT part of the shared-schedule key: re-keying would
   // rebuild every ParticleLayer's GPU state on each change. A new window instead
@@ -241,7 +295,8 @@ export function Dashboard() {
 
         <div className={styles.toolbar}>
           {/* One row per flow: its on/off switch (the swatch doubles as the
-              legend) · its own time-of-day window · its readout. The three
+              legend) · its own time-of-day window · its readout · what one
+              particle stands for. The four
               columns live on .flowRows, not on the rows, so both rails start and
               end at the same x despite the labels' different widths. No "Time of
               day" caption: the 00–24 bounds, the 06/12/18 ticks and the "07:00–
@@ -301,6 +356,20 @@ export function Dashboard() {
                       .join(' ')}
                   >
                     {formatHour(live[0])}–{formatHour(live[1])}
+                  </span>
+                  {/* What the swarm's density means. Always rendered — the rows
+                      share .flowRows' columns, so a missing cell would shift the
+                      next row — but empty until this flow's totals are known. */}
+                  <span
+                    className={[styles.flowScale, hoursDisabled ? styles.hourDisabled : '']
+                      .filter(Boolean)
+                      .join(' ')}
+                    data-flow={flow.id}
+                    data-particles={flows[flow.id]}
+                  >
+                    {hourTotals[flow.id]
+                      ? `1 particle ≈ ${tripsPerParticle[flow.id].toLocaleString('en-US')} ${flow.tripUnit}`
+                      : ''}
                   </span>
                 </div>
               )
@@ -367,6 +436,8 @@ export function Dashboard() {
                   <TerrainPanel
                     source={source}
                     flows={flows}
+                    tripsPerParticle={tripsPerParticle}
+                    onTripsPerParticleChange={changeTripsPerParticle}
                     activePanels={panels.length}
                     camera={cameraFor(panel.key)}
                     onCameraChange={handleCameraChange(panel.key)}
