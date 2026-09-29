@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
     "make-samples": "tsx scripts/make-sample-inputs.ts",
-    "preprocess": "tsx scripts/preprocess/run.ts"
+    "preprocess": "tsx scripts/preprocess/run.ts",
+    "shot": "node scripts/shot.mjs"
   },
   "dependencies": {
     "@deck.gl/core": "^9.3.6",

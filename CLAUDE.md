@@ -29,10 +29,17 @@ Page structure: **Hero → About → Dashboard**. UI copy is English; code ident
 - `npm run build` — `tsc -b && vite build`
 - `npm run typecheck` — `tsc -b --noEmit`
 - `npm run lint` — **oxlint** (not eslint)
+- `npm run shot -- <phase>` — the visual-verification harness (`scripts/shot.mjs`)
 
-No test runner. Verify each increment **visually**: run the dev server and screenshot with
-Playwright (`npm i -D playwright && npx playwright install chromium`, then a short
-`chromium.launch` script) — this is the project's verification loop, not unit tests.
+No test runner. Verify each increment **visually**: with `npm run dev` running, drive
+`npm run shot -- <phase>` (Playwright + SwiftShader; screenshots and a JSON report land in
+the gitignored `.preview/`). This is the project's verification loop, not unit tests.
+Phases: `layout` `overflow` `state` `keys` `pointer` `disabled` `noblank` `panels` `perflow`
+`bike` `tune` — plus `--flow bike|migration`, `--width N`, `--preset` for `tune`. It carries
+the fixtures that are tedious to rebuild: a PNG→RGBA `analyze()` that counts particle pixels
+per flow, a `boot()` capturing console / pageerror / failed-request / Supabase-RPC channels,
+and `[class*=]` selectors for the hashed CSS Module classnames. **Add a phase there** rather
+than starting a new one-off script — the root `.shot-*.mjs` pattern stays gitignored.
 
 ## Architecture
 
