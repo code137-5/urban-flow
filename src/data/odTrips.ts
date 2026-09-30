@@ -62,9 +62,12 @@ export interface OdFlow {
    * trips when Supabase is unavailable, so the default view is never motionless.
    */
   defaultOn: boolean
-  /** Where the OD endpoints live: `placeId`, `lat`, `lon` columns. */
-  placeTable: string
-  placeId: string
+  /**
+   * Where the OD endpoints live — either a Supabase table with `id`, `lat`, `lon`
+   * columns (paginated once), or a static JSON file of `{ id, lat, lon }[]` under
+   * `public/` (a few hundred rows is not worth a table, a user decision).
+   */
+  places: { table: string; id: string } | { url: string }
   /**
    * `(n int, hour_from int, hour_to int) → { o, d }[]` place-id pairs drawn
    * ∝ trips within the half-open hour window, n ≤ 1000.
@@ -105,8 +108,7 @@ export const FLOWS: readonly OdFlow[] = [
     label: 'Bike trips (따릉이)',
     color: '#f4f4f4', // near-white — legible on both the cyan and the red end of the ramp
     defaultOn: false,
-    placeTable: 'bike_station',
-    placeId: 'station_no',
+    places: { table: 'bike_station', id: 'station_no' },
     sampleRpc: 'sample_bike_od_hourly',
     totalsTable: 'bike_od_hourly_totals',
     tripsPerParticle: 15_000,
@@ -120,8 +122,9 @@ export const FLOWS: readonly OdFlow[] = [
     label: 'Living migration (생활이동)',
     color: '#f1c21b', // Carbon Yellow 30 — the one hue far from cyan, red and white
     defaultOn: true,
-    placeTable: 'living_migration_adm_dong',
-    placeId: 'admdong_cd',
+    // 426 dong representative points (행안부 admdong_cd → lat/lon), built by
+    // particle-generator/notebooks/living_migration_od.ipynb; shipped static.
+    places: { url: `${import.meta.env.BASE_URL}data/living-migration-dongs.json` },
     sampleRpc: 'sample_living_migration_hourly',
     totalsTable: 'living_migration_hourly_totals',
     tripsPerParticle: 8_000,
@@ -189,25 +192,40 @@ interface Leg {
 
 type Places = Map<number, Place>
 
+type PlaceRow = { id: number; lat: number; lon: number }
+
+/** Every place row of the flow, from its table (paginated) or its static file. */
+async function loadPlaceRows(client: SupabaseClient, flow: OdFlow): Promise<PlaceRow[]> {
+  if ('url' in flow.places) {
+    const res = await fetch(flow.places.url)
+    if (!res.ok) throw new Error(`${flow.places.url}: ${res.status} ${res.statusText}`)
+    return (await res.json()) as PlaceRow[]
+  }
+  const { table, id } = flow.places
+  const rows: PlaceRow[] = []
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await client
+      .from(table)
+      .select(`id:${id}, lat, lon`)
+      .order(id)
+      .range(from, from + PAGE_SIZE - 1)
+    if (error) throw error
+    const page = data as unknown as PlaceRow[]
+    rows.push(...page)
+    if (page.length < PAGE_SIZE) break
+  }
+  return rows
+}
+
 async function loadPlaces(client: SupabaseClient, flow: OdFlow): Promise<Places> {
   const [minLng, minLat, maxLng, maxLat] = SEOUL_BOUNDS
   const places: Places = new Map()
-  for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await client
-      .from(flow.placeTable)
-      .select(`id:${flow.placeId}, lat, lon`)
-      .order(flow.placeId)
-      .range(from, from + PAGE_SIZE - 1)
-    if (error) throw error
-    const rows = data as unknown as { id: number; lat: number; lon: number }[]
-    for (const { id, lat, lon } of rows) {
-      // Trip endpoints are never clamped downstream (lngLatToUv), so a place
-      // outside the bounds would draw its particle off the terrain.
-      if (lon >= minLng && lon <= maxLng && lat >= minLat && lat <= maxLat) {
-        places.set(id, { center: [lon, lat], radius: 0 })
-      }
+  for (const { id, lat, lon } of await loadPlaceRows(client, flow)) {
+    // Trip endpoints are never clamped downstream (lngLatToUv), so a place
+    // outside the bounds would draw its particle off the terrain.
+    if (lon >= minLng && lon <= maxLng && lat >= minLat && lat <= maxLat) {
+      places.set(id, { center: [lon, lat], radius: 0 })
     }
-    if (rows.length < PAGE_SIZE) break
   }
   if (flow.scatter) {
     // No polygons or areas in the table, so size each dong by its spacing: half
@@ -303,7 +321,10 @@ function placesFor(state: FlowState, client: SupabaseClient, flow: OdFlow): Prom
     const loading = (async () => {
       const places = await loadPlaces(client, flow)
       // An RLS-blocked table answers 200 with zero rows, not an error.
-      if (places.size === 0) throw new Error(`${flow.placeTable} returned no rows (RLS policy?)`)
+      if (places.size === 0) {
+        const where = 'url' in flow.places ? flow.places.url : `${flow.places.table} (RLS policy?)`
+        throw new Error(`${where} returned no places`)
+      }
       return places
     })()
     state.places = loading

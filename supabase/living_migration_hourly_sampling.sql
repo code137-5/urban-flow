@@ -10,8 +10,8 @@
 -- Tables (uploaded by hand):
 --   living_migration_hourly   (o_admdong_cd int, d_admdong_cd int, hour int,
 --                              trips float)                          ~1.54M OD×hour rows
---   living_migration_adm_dong (admdong_cd, sgis_adm_cd, sgg_nm, admdong_nm,
---                              lat, lon, out_trips, in_trips)           426 dongs
+--   (dong centroids are no longer a table: the 426 representative points ship as
+--    public/data/living-migration-dongs.json in the site repo)
 
 -- Building the cum view sorts all 1.54M rows inside 24 window partitions, which can
 -- run past the SQL Editor's default statement timeout on a small instance.
