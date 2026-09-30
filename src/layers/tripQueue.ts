@@ -40,6 +40,15 @@ export class TripQueue {
   }
 
   /**
+   * The source answered with an empty batch, so this queue will never ask it
+   * again (until a `flush()`): whoever plays from it is stuck. The registry uses
+   * this to hand out a fresh schedule instead of a dead one.
+   */
+  get parked(): boolean {
+    return this.exhausted && !this.disposed
+  }
+
+  /**
    * Pop one trip, or null if the pool is empty. Kicks off a refill when low. The
    * dry-source warning fires once per queue, and not during a flush's refill
    * round trip, when an empty pool is expected.

@@ -32,7 +32,8 @@ import type { Trip, TripSource } from './trips'
  * item, so re-selecting the window is instant.
  *
  * Request volume: the common case is unchanged — every panel on the default
- * windows shares two reservoirs, two refresh RPCs a minute page-wide. The worst
+ * windows shares one reservoir per flow that is on (one refresh RPC a minute
+ * page-wide with only living migration on, two with bike on too). The worst
  * case, 6 panels × 2 flows on 12 distinct windows, is 12 refresh RPCs a minute
  * with ~60k legs resident; the 5-batch loads themselves only ever happen once per
  * window while it stays in the LRU.

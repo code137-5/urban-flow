@@ -148,7 +148,10 @@ export function Dashboard() {
   // its window ÷ its trips per particle once the totals are known) plus the
   // window itself. Memoised as one map so a panel's `flows` prop keeps its
   // identity between commits that touch neither the panels nor the totals —
-  // TerrainPanel keys its schedules on it.
+  // TerrainPanel keys its schedules on it. (Any panel edit rebuilds every
+  // panel's record; the other panels then re-run their layer memos, which is
+  // cheap — deck diffs the props and touches no GPU state — so no per-panel
+  // caching.)
   const resolved = useMemo(() => {
     const map = new Map<number, Record<FlowId, PanelFlow>>()
     for (const p of panels) map.set(p.key, resolvePanelFlows(p.flows, hourTotals))

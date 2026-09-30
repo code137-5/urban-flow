@@ -59,6 +59,11 @@ export class TripSchedule {
     this.source.dispose?.()
   }
 
+  /** The source ran dry (an hour window that failed to load): see TripQueue.parked. */
+  get parked(): boolean {
+    return this.queue.parked
+  }
+
   /** Resolves once slots [0, n) are playing (or the source had nothing to give). */
   ensure(n: number): Promise<void> {
     this.growing = this.growing.then(async () => {
@@ -176,9 +181,18 @@ function armReaper(key: string, entry: SharedEntry): void {
  * identical particles. Creating does not retain: pair it with
  * `retainTripSchedule` / `releaseTripSchedule` from an effect (effects balance
  * under StrictMode; memos don't), or the entry is reaped after the grace period.
+ * A parked schedule (its window failed to load) that nobody holds is replaced
+ * rather than handed back, so re-selecting that window retries; while a panel
+ * still holds it, it stays parked.
  */
 export function sharedTripSchedule(key: string, make: () => TripSchedule): TripSchedule {
   let entry = shared.get(key)
+  if (entry && entry.refs === 0 && entry.schedule.parked) {
+    if (entry.reaper !== null) clearTimeout(entry.reaper)
+    shared.delete(key)
+    entry.schedule.dispose()
+    entry = undefined
+  }
   if (!entry) {
     entry = { schedule: make(), refs: 0, reaper: null }
     shared.set(key, entry)

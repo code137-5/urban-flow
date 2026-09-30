@@ -25,8 +25,8 @@ void main(void) {
   // full brightness and is gone. Progress runs 0..1 (lifecycle.x = 1) and the
   // fade-in window (lifecycle.w) is a fraction of the trip. Progress 1 itself is
   // hidden: that is where a finished slot parks until the CPU hands it its next
-  // trip -- normally the same step, but a slot cleared by TripSchedule.reset()
-  // waits there for the new hour window, and must not sit lit at its destination.
+  // trip -- normally the same step, but a slot whose source has nothing to give
+  // (still loading, or parked) waits there, and must not sit lit at its destination.
   float fadeIn = smoothstep(0.0, particle.lifecycle.w, positions.w);
   float fadeOut = 1.0 - step(particle.lifecycle.x, positions.w);
   // Arrival ramp (lifecycle.z, 0..1): alpha climbs with progress, so a particle

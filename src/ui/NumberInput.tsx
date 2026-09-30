@@ -22,7 +22,12 @@ const defaultFormat = (v: number) => v.toLocaleString('en-US')
 
 /** Digits only ("15,000" → 15000); null for nothing usable. */
 function parseDraft(text: string): number | null {
-  const digits = text.replace(/\D/g, '')
+  // Only an unsigned integer counts, thousands separators and spaces allowed
+  // ("8,000", "8 000"). A sign or a decimal point makes the draft invalid rather
+  // than silently becoming another number ("8000.5" must not read as 80005).
+  const m = /^\s*([\d,\s]+)\s*$/.exec(text)
+  if (!m) return null
+  const digits = m[1].replace(/[,\s]/g, '')
   if (digits === '') return null
   const n = Number(digits)
   return Number.isFinite(n) ? n : null
@@ -119,7 +124,7 @@ export function NumberInput({
         type="button"
         tabIndex={-1}
         className={styles.stepper}
-        aria-label="Decrease"
+        aria-label={`Decrease ${ariaLabel}`}
         disabled={disabled || base() <= min}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => nudge(-1)}
@@ -130,7 +135,7 @@ export function NumberInput({
         type="button"
         tabIndex={-1}
         className={styles.stepper}
-        aria-label="Increase"
+        aria-label={`Increase ${ariaLabel}`}
         disabled={disabled || base() >= max}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => nudge(1)}
