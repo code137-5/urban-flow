@@ -82,7 +82,7 @@ export interface OdFlow {
    * people) — the defaults are tuned so the 07–10 window draws ~400 of each.
    */
   tripsPerParticle: number
-  /** What the totals count, for the toolbar legend: "1 particle ≈ 15,000 <unit>". */
+  /** What the totals count, for each panel's scale line: "1 particle ≈ 15,000 <unit>". */
   tripUnit: string
   /**
    * Places are area centroids, not points: scatter each endpoint around its
@@ -143,29 +143,6 @@ const REFRESH_MS = 60_000
 function clampHourRange(from: number, to: number): HourRange {
   const lo = Math.min(23, Math.max(0, Math.round(from)))
   return [lo, Math.min(24, Math.max(lo + 1, Math.round(to)))]
-}
-
-/**
- * Move one flow's page-wide window — the window a source built WITHOUT
- * `OdTripOptions.range` samples in. Returns true only when it actually moved, so
- * the caller knows whether to reset that flow's schedules — and so a repeated (or
- * StrictMode-doubled) call with the same hours is a no-op.
- *
- * @deprecated Windows are per source now (`OdTripOptions.range`, part of the
- * schedule key). Kept only for the page-wide dashboard until the per-panel one
- * lands; nothing new should call it.
- */
-export function setOdHourRange(flowId: FlowId, from: number, to: number): boolean {
-  const state = stateFor(flowId)
-  const next = clampHourRange(from, to)
-  if (next[0] === state.range[0] && next[1] === state.range[1]) return false
-  state.range = next
-  return true
-}
-
-/** @deprecated with `setOdHourRange` — the window is per source now. */
-export function getOdHourRange(flowId: FlowId): HourRange {
-  return stateFor(flowId).range
 }
 
 /**
@@ -279,11 +256,6 @@ interface Lease {
 
 /** Everything the page keeps per flow. One instance, created on first use. */
 interface FlowState {
-  /**
-   * The page-wide window a source built without `OdTripOptions.range` samples in.
-   * @deprecated with `setOdHourRange`.
-   */
-  range: HourRange
   /** Endpoint coordinates — hour-independent, so paginated once and reused. */
   places: Promise<Places> | null
   /** Trips per hour of day (length 24), fetched once; resolves null when unavailable. */
@@ -292,12 +264,6 @@ interface FlowState {
   reservoirs: Map<string, Promise<Leg[] | null>>
   /** Windows some live source is sampling — pinned in the LRU, each with its refresh timer. */
   leases: Map<string, Lease>
-  /**
-   * The page-wide refresh interval for `range`, armed by the first reservoir a
-   * window-less source loaded.
-   * @deprecated with `armRefresh` — leased windows carry their own timer.
-   */
-  timer: ReturnType<typeof setInterval> | null
   /** Whether this flow has already printed its one console status line. */
   announced: boolean
   /** Sticky: Supabase can't supply this flow at all this page load. */
@@ -307,19 +273,17 @@ interface FlowState {
 const states = new Map<FlowId, FlowState>()
 
 /**
- * Keyed by id, not by `OdFlow`, so the totals loader (and the deprecated hour
- * setter) can create a flow's state before anything has asked it for trips.
+ * Keyed by id, not by `OdFlow`, so the totals loader can create a flow's state
+ * before anything has asked it for trips.
  */
 function stateFor(flowId: FlowId): FlowState {
   let state = states.get(flowId)
   if (!state) {
     state = {
-      range: DEFAULT_HOUR_RANGE,
       places: null,
       totals: null,
       reservoirs: new Map(),
       leases: new Map(),
-      timer: null,
       announced: false,
       failed: false,
     }
@@ -470,21 +434,6 @@ function releaseLease(state: FlowState, key: string): void {
 }
 
 /**
- * The page-wide refresh timer for the deprecated window-less path: every tick it
- * samples fresh legs for whichever window `state.range` says *now*.
- *
- * @deprecated Sources built with `OdTripOptions.range` refresh through their
- * lease instead. Delete with `setOdHourRange`.
- */
-function armRefresh(state: FlowState, flow: OdFlow): void {
-  if (state.timer !== null) return
-  state.timer = setInterval(() => {
-    const range = state.range
-    refreshReservoir(state, flow, rangeKey(range), range)
-  }, REFRESH_MS)
-}
-
-/**
  * Trim the LRU: never the window just touched, never a leased one (a live source
  * holds its array). Map order = insertion order, so the first eligible key is
  * the least recently used.
@@ -508,16 +457,10 @@ function evict(state: FlowState, keep: string): void {
  * stays in the LRU. Never rejects. `null` = Supabase can't supply this flow at
  * all (first failure, sticky for the page); `[]` = the flow connected but this
  * window failed to load — the key is forgotten so asking again retries, and the
- * source answers an empty batch, which parks its schedule.
- *
- * `legacyRefresh` is the deprecated window-less path, which refreshes through the
- * page-wide timer rather than a lease.
+ * source answers an empty batch, which parks its schedule. Refreshing is the
+ * window's lease's business (`acquireLease`), not this loader's.
  */
-function reservoirFor(
-  flow: OdFlow,
-  range: HourRange,
-  legacyRefresh = false,
-): Promise<Leg[] | null> {
+function reservoirFor(flow: OdFlow, range: HourRange): Promise<Leg[] | null> {
   const state = stateFor(flow.id)
   const key = rangeKey(range)
   const cached = state.reservoirs.get(key)
@@ -565,7 +508,6 @@ function reservoirFor(
       } else {
         console.debug(`${tag} ${key}h — ${legs.length} weighted OD samples`)
       }
-      if (legacyRefresh) armRefresh(state, flow)
       return legs
     } catch (err) {
       if (!state.announced) {
@@ -590,14 +532,11 @@ function reservoirFor(
 export interface OdTripOptions {
   /**
    * The time-of-day window this source samples in, fixed for its lifetime — a
-   * panel that changes window builds a new source (and schedule). Clamped like
-   * `setOdHourRange`. The source leases the window's reservoir until `dispose()`.
-   *
-   * Optional only while the page-wide dashboard remains: without it the source
-   * samples in the flow's `setOdHourRange` window, read per batch, and holds no
-   * lease. That path is deprecated; new callers always pass a range.
+   * panel that changes window builds a new source (and schedule). Clamped to
+   * whole hours in [0, 24) / (from, 24], never wrapped. The source leases the
+   * window's reservoir until `dispose()`.
    */
-  range?: HourRange
+  range: HourRange
   /**
    * Supplies trips when Supabase is unconfigured or unreachable. Without one the
    * source returns nothing and the flow simply doesn't draw.
@@ -618,13 +557,13 @@ export interface OdTripOptions {
  * `dispose()` releases the reservoir lease; idempotent, and called once by the
  * schedule that plays this source when its last panel lets go.
  */
-export function odTripSource(flow: OdFlow, opts: OdTripOptions = {}): TripSource {
+export function odTripSource(flow: OdFlow, opts: OdTripOptions): TripSource {
   const { fallback, seed = 0x5e0e1, speedMps = [500, 900] } = opts
   const rand = mulberry32(seed)
   const [minLng, minLat, maxLng, maxLat] = SEOUL_BOUNDS
   const state = stateFor(flow.id)
-  const range = opts.range ? clampHourRange(opts.range[0], opts.range[1]) : null
-  if (range) acquireLease(state, flow, range)
+  const range = clampHourRange(opts.range[0], opts.range[1])
+  acquireLease(state, flow, range)
   let disposed = false
 
   /** A point for this endpoint: the place itself, or uniform in its disc. */
@@ -639,11 +578,7 @@ export function odTripSource(flow: OdFlow, opts: OdTripOptions = {}): TripSource
 
   return {
     next: async (count) => {
-      // A ranged source samples its own window; the deprecated window-less one
-      // reads the flow's page-wide window per batch, so it follows the slider.
-      const legs = range
-        ? await reservoirFor(flow, range)
-        : await reservoirFor(flow, state.range, true)
+      const legs = await reservoirFor(flow, range)
       if (legs === null) return fallback ? fallback.next(count) : []
       if (legs.length === 0) return []
       return Array.from({ length: count }, (): Trip => {
@@ -664,7 +599,7 @@ export function odTripSource(flow: OdFlow, opts: OdTripOptions = {}): TripSource
     dispose: () => {
       if (disposed) return
       disposed = true
-      if (range) releaseLease(state, rangeKey(range))
+      releaseLease(state, rangeKey(range))
     },
   }
 }

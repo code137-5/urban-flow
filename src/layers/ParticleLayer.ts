@@ -123,8 +123,6 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     history?: Buffer[]
     historyHead: number
     stepCount: number
-    /** The schedule's `epoch` this layer's trail ring belongs to. */
-    epoch: number
     /** Static per-slot trip endpoints (UV) and timing; CPU mirrors below. */
     tripBuffer?: Buffer
     timingBuffer?: Buffer
@@ -156,7 +154,6 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     this.state.lastStepTime = 0
     this.state.historyHead = 0
     this.state.stepCount = 0
-    this.state.epoch = 0
     this.state.setupToken = 0
     this.state.simTime = 0
   }
@@ -290,7 +287,6 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     this.state.history = history
     this.state.historyHead = 0
     this.state.stepCount = 0
-    this.state.epoch = this.props.schedule.epoch
     this.state.tripBuffer = tripBuffer
     this.state.timingBuffer = timingBuffer
     this.state.tripData = tripData
@@ -464,14 +460,6 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
       clearStencil: false,
     })
     this.state.current = 1 - current
-
-    // The schedule was reset (new OD hour window): its slots are parked and
-    // hidden as of this step, so re-seed the trail ring from it — otherwise the
-    // old swarm's ghosts would hang frozen until the ring rotated them out.
-    if (this.props.schedule.epoch !== this.state.epoch) {
-      this.state.epoch = this.props.schedule.epoch
-      this._rebuildHistory()
-    }
 
     // Rotate a state snapshot into the trail ring every `trailGap` steps so the
     // ghost afterimages sit a visible distance behind the live particles.

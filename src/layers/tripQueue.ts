@@ -40,15 +40,15 @@ export class TripQueue {
   }
 
   /**
-   * Pop one trip, or null if the pool is empty. Kicks off a refill when low.
-   * `quiet` skips the dry-source warning, for a caller that expects an empty pool
-   * (a schedule refilling every slot at once after a reset).
+   * Pop one trip, or null if the pool is empty. Kicks off a refill when low. The
+   * dry-source warning fires once per queue, and not during a flush's refill
+   * round trip, when an empty pool is expected.
    */
-  take(quiet = false): Trip | null {
+  take(): Trip | null {
     const lowWater = this.opts.lowWater ?? 100
     if (this.pool.length <= lowWater) void this.refill()
     const trip = this.pool.pop() ?? null
-    if (trip === null && !quiet && !this.warned && !this.flushing) {
+    if (trip === null && !this.warned && !this.flushing) {
       this.warned = true
       console.warn('[urban-flow] trip source has no trips ready; particles re-loop their last trip')
     }
