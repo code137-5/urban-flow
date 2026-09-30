@@ -1,0 +1,116 @@
+/* One panel's particle-flow strip, between the panel head and the canvas.
+   Layout follows the strip's own width (container queries), not the viewport:
+   the same panel is wide in a 1-column grid and narrow in a 3-column one.
+   Default 3 lines: toggle | readout / rail / scale. */
+.flowRows {
+  container: flowrows / inline-size;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.flowRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'toggle readout'
+    'rail rail'
+    'scale scale';
+  align-items: center;
+  column-gap: var(--space-sm);
+}
+
+.flowRow + .flowRow {
+  margin-top: var(--space-xs);
+  padding-top: var(--space-xs);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Full 32px line, so the switch is a proper Carbon target. */
+.toggle {
+  grid-area: toggle;
+  min-width: 0;
+  min-height: var(--control-height-sm);
+}
+
+.flowLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flowSwatch {
+  flex: none;
+  width: 8px;
+  height: 8px;
+}
+
+.hourValue {
+  grid-area: readout;
+  min-width: 11ch;
+  text-align: right;
+  font: var(--type-caption);
+  letter-spacing: 0.32px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  transition: color var(--duration-fast-02) var(--ease-standard);
+}
+
+.hourPending {
+  color: var(--text-primary);
+}
+
+/* This flow is off (or there is no live OD data): the readout and the scale dim
+   with the slider. Last of the three, so it wins over the pending brightening. */
+.hourDisabled {
+  color: var(--text-disabled);
+}
+
+.hourSlider {
+  grid-area: rail;
+  min-width: 0;
+}
+
+/* "1 particle ≈ [15,000] trips" — the scale of the encoding. Indented to the
+   label (16px checkbox + 12px gap) under the toggle. */
+.flowScale {
+  grid-area: scale;
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding-left: 28px;
+  min-height: var(--control-height-sm);
+  font: var(--type-caption);
+  letter-spacing: 0.32px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--text-helper);
+}
+
+.tpp {
+  flex: none;
+}
+
+/* Wide strip: 2 lines — toggle | readout / rail | scale, scale right-aligned. */
+@container flowrows (min-width: 520px) {
+  .flowRow {
+    grid-template-areas:
+      'toggle readout'
+      'rail scale';
+  }
+
+  .flowScale {
+    padding-left: 0;
+    justify-self: end;
+  }
+}
+
+/* Very narrow strip: drop the indent and let the scale wrap. */
+@container flowrows (max-width: 319px) {
+  .flowScale {
+    padding-left: 0;
+    flex-wrap: wrap;
+  }
+}

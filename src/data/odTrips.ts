@@ -15,21 +15,27 @@ import type { Trip, TripSource } from './trips'
  * The OD tables are far too big to download (bike ~3.45M pair-hours), so the
  * weighted draw happens in Postgres (one `sample_*_hourly` RPC per flow, see
  * supabase/*_hourly_sampling.sql). To keep egress flat the page holds ONE shared
- * reservoir of weighted samples per (flow, hour window); every trip source draws
- * uniformly from the current one (a uniform draw from a weighted sample is still
- * weighted). A small LRU of windows means going back to a window already looked at
- * costs nothing, and one timer per flow slowly refreshes the visible window so the
- * long tail of pairs rotates through.
+ * reservoir of weighted samples per (flow, hour window); every trip source on
+ * that window draws uniformly from it (a uniform draw from a weighted sample is
+ * still weighted). A small LRU of windows means going back to a window already
+ * looked at costs nothing.
  *
- * Each flow carries its OWN time-of-day window — bike at 07–10 against migration
- * at 17–20 is a legitimate comparison — held as module state here, one per flow.
- * Page-wide across panels is the part that matters for the dashboard: every panel
- * reads the same window for a given flow, which is what keeps their swarms in
- * lockstep. The window stays OUT of the schedule key (tripSchedule.ts) all the
- * same: keying schedules by it would tear down every ParticleLayer and blank the
- * swarm on each change. Instead the window is read at `next()` time and only that
- * flow's prefetch pools are flushed, so particles in flight land normally and only
- * the trips after them come from the new window.
+ * Each panel chooses its own time-of-day window per flow — bike 07–10 beside
+ * bike 17–20 is the point of the dashboard — so a trip source is built FOR one
+ * (flow, window) (`OdTripOptions.range`) and the window is part of its schedule's
+ * key (tripSchedule.ts): panels on the same window share one schedule and move in
+ * lockstep, panels on different windows run their own. While a source is alive it
+ * holds a LEASE on its reservoir: the entry is pinned in the LRU, and the first
+ * lease on a window arms that window's one slow refresh timer, which rotates the
+ * long tail of pairs through by overwriting the reservoir in place. The last
+ * `dispose()` clears the timer and the entry becomes an ordinary evictable LRU
+ * item, so re-selecting the window is instant.
+ *
+ * Request volume: the common case is unchanged — every panel on the default
+ * windows shares two reservoirs, two refresh RPCs a minute page-wide. The worst
+ * case, 6 panels × 2 flows on 12 distinct windows, is 12 refresh RPCs a minute
+ * with ~60k legs resident; the 5-batch loads themselves only ever happen once per
+ * window while it stays in the LRU.
  *
  * Places (station / dong coordinates) are hour-independent, so they are paginated
  * once per flow per page load and shared by every window.
@@ -140,10 +146,14 @@ function clampHourRange(from: number, to: number): HourRange {
 }
 
 /**
- * Move one flow's window. Returns true only when it actually moved, so the caller
- * knows whether to flush that flow's schedules — and so a repeated (or
- * StrictMode-doubled) call with the same hours is a no-op. `stateFor` keys by id,
- * so the window can be set before this flow has ever loaded a reservoir.
+ * Move one flow's page-wide window — the window a source built WITHOUT
+ * `OdTripOptions.range` samples in. Returns true only when it actually moved, so
+ * the caller knows whether to reset that flow's schedules — and so a repeated (or
+ * StrictMode-doubled) call with the same hours is a no-op.
+ *
+ * @deprecated Windows are per source now (`OdTripOptions.range`, part of the
+ * schedule key). Kept only for the page-wide dashboard until the per-panel one
+ * lands; nothing new should call it.
  */
 export function setOdHourRange(flowId: FlowId, from: number, to: number): boolean {
   const state = stateFor(flowId)
@@ -153,6 +163,7 @@ export function setOdHourRange(flowId: FlowId, from: number, to: number): boolea
   return true
 }
 
+/** @deprecated with `setOdHourRange` — the window is per source now. */
 export function getOdHourRange(flowId: FlowId): HourRange {
   return stateFor(flowId).range
 }
@@ -160,8 +171,8 @@ export function getOdHourRange(flowId: FlowId): HourRange {
 /**
  * Multiplier on every scattered place's disc radius (`OdFlow.scatter`): 1 is the
  * half-nearest-centroid disc, 0 pins each endpoint to its centroid so all trips
- * between two dongs ride one line. Page-wide like the hour windows — every panel
- * plays the same trips — and a dev knob only (`?tune`).
+ * between two dongs ride one line. Page-wide — every panel scatters alike — and a
+ * dev knob only (`?tune`); a change flushes the schedules' prefetch pools.
  *
  * Default 0 (user decision): dong-to-dong flows read as clean lines between
  * centroids rather than a haze, and the corridors that carry the most trips
@@ -257,9 +268,21 @@ async function sampleLegs(
   return legs
 }
 
+/**
+ * The live sources on one (flow, hour window): how many, and the window's one
+ * refresh timer, which runs exactly while `refs` > 0.
+ */
+interface Lease {
+  refs: number
+  timer: ReturnType<typeof setInterval>
+}
+
 /** Everything the page keeps per flow. One instance, created on first use. */
 interface FlowState {
-  /** This flow's own time-of-day window — the one every panel samples it in. */
+  /**
+   * The page-wide window a source built without `OdTripOptions.range` samples in.
+   * @deprecated with `setOdHourRange`.
+   */
   range: HourRange
   /** Endpoint coordinates — hour-independent, so paginated once and reused. */
   places: Promise<Places> | null
@@ -267,9 +290,13 @@ interface FlowState {
   totals: Promise<number[] | null> | null
   /** Reservoir per hour window, keyed `${from}-${to}`, used as an LRU. */
   reservoirs: Map<string, Promise<Leg[] | null>>
-  /** The most recent reservoir that actually loaded — what a failed window falls back to. */
-  live: Leg[] | null
-  /** The one slow-refresh interval, armed by the first reservoir that loaded. */
+  /** Windows some live source is sampling — pinned in the LRU, each with its refresh timer. */
+  leases: Map<string, Lease>
+  /**
+   * The page-wide refresh interval for `range`, armed by the first reservoir a
+   * window-less source loaded.
+   * @deprecated with `armRefresh` — leased windows carry their own timer.
+   */
   timer: ReturnType<typeof setInterval> | null
   /** Whether this flow has already printed its one console status line. */
   announced: boolean
@@ -280,8 +307,8 @@ interface FlowState {
 const states = new Map<FlowId, FlowState>()
 
 /**
- * Keyed by id, not by `OdFlow`, so the hour setter can create a flow's state
- * before anything has asked it for trips.
+ * Keyed by id, not by `OdFlow`, so the totals loader (and the deprecated hour
+ * setter) can create a flow's state before anything has asked it for trips.
  */
 function stateFor(flowId: FlowId): FlowState {
   let state = states.get(flowId)
@@ -291,7 +318,7 @@ function stateFor(flowId: FlowId): FlowState {
       places: null,
       totals: null,
       reservoirs: new Map(),
-      live: null,
+      leases: new Map(),
       timer: null,
       announced: false,
       failed: false,
@@ -386,42 +413,87 @@ export function particlesForWindow(
 }
 
 /**
- * One slow refresh timer per flow: every tick it samples fresh legs for whichever
- * window this flow is showing *now* — read at tick time, so a slider move needs no
- * re-arming — and overwrites random entries of that reservoir IN PLACE: trip
- * sources hold the array itself, so it must never be swapped out.
+ * One refresh tick for a (flow, window): sample a fresh batch and overwrite
+ * random entries of the loaded reservoir IN PLACE — trip sources hold the array
+ * itself, so it must never be swapped out. Skipped while the tab is hidden, while
+ * the reservoir hasn't loaded (or loaded empty / failed), and thrown away if the
+ * entry was replaced or evicted while the request was in flight — those legs
+ * belong to a reservoir nobody holds. Never throws.
  */
-function armRefresh(state: FlowState, client: SupabaseClient, flow: OdFlow): void {
+function refreshReservoir(state: FlowState, flow: OdFlow, key: string, range: HourRange): void {
+  if (document.hidden) return
+  const cached = state.reservoirs.get(key)
+  const places = state.places
+  if (!cached || !places) return
+  void (async () => {
+    try {
+      const client = await getSupabase()
+      if (!client) return
+      const legs = await cached
+      if (!legs || legs.length === 0) return
+      const fresh = await sampleLegs(client, flow, await places, range)
+      if (state.reservoirs.get(key) !== cached) return
+      for (const leg of fresh) legs[Math.floor(Math.random() * legs.length)] = leg
+    } catch {
+      // Keep playing the reservoir we have.
+    }
+  })()
+}
+
+/**
+ * A source built for `range` is alive: pin the window in the LRU and, for the
+ * first one, arm the window's refresh timer. Later sources on the same window
+ * (other panels in lockstep) just count. Balanced by `releaseLease`.
+ */
+function acquireLease(state: FlowState, flow: OdFlow, range: HourRange): void {
+  const key = rangeKey(range)
+  const lease = state.leases.get(key)
+  if (lease) {
+    lease.refs += 1
+    return
+  }
+  const timer = setInterval(() => refreshReservoir(state, flow, key, range), REFRESH_MS)
+  state.leases.set(key, { refs: 1, timer })
+}
+
+/**
+ * A source on `key` was disposed. The last one clears the timer; the reservoir
+ * stays cached as an ordinary evictable LRU entry, so coming back is instant.
+ */
+function releaseLease(state: FlowState, key: string): void {
+  const lease = state.leases.get(key)
+  if (!lease) return
+  lease.refs -= 1
+  if (lease.refs > 0) return
+  clearInterval(lease.timer)
+  state.leases.delete(key)
+}
+
+/**
+ * The page-wide refresh timer for the deprecated window-less path: every tick it
+ * samples fresh legs for whichever window `state.range` says *now*.
+ *
+ * @deprecated Sources built with `OdTripOptions.range` refresh through their
+ * lease instead. Delete with `setOdHourRange`.
+ */
+function armRefresh(state: FlowState, flow: OdFlow): void {
   if (state.timer !== null) return
   state.timer = setInterval(() => {
-    if (document.hidden) return
     const range = state.range
-    const key = rangeKey(range)
-    const cached = state.reservoirs.get(key)
-    const places = state.places
-    if (!cached || !places) return
-    void (async () => {
-      try {
-        const legs = await cached
-        if (!legs || legs.length === 0) return
-        const fresh = await sampleLegs(client, flow, await places, range)
-        // The window may have moved on (or this entry been evicted) while the
-        // request was in flight — those legs belong to a reservoir nobody holds.
-        if (state.reservoirs.get(key) !== cached) return
-        for (const leg of fresh) legs[Math.floor(Math.random() * legs.length)] = leg
-      } catch {
-        // Keep playing the reservoir we have.
-      }
-    })()
+    refreshReservoir(state, flow, rangeKey(range), range)
   }, REFRESH_MS)
 }
 
-/** Trim the LRU, never the window just touched (Map order = insertion order). */
+/**
+ * Trim the LRU: never the window just touched, never a leased one (a live source
+ * holds its array). Map order = insertion order, so the first eligible key is
+ * the least recently used.
+ */
 function evict(state: FlowState, keep: string): void {
   while (state.reservoirs.size > RESERVOIR_CACHE) {
     let oldest: string | undefined
     for (const key of state.reservoirs.keys()) {
-      if (key !== keep) {
+      if (key !== keep && !state.leases.has(key)) {
         oldest = key
         break
       }
@@ -433,11 +505,19 @@ function evict(state: FlowState, keep: string): void {
 
 /**
  * The shared reservoir for one (flow, hour window), loaded at most once while it
- * stays in the LRU; `null` = Supabase can't supply it. Never rejects, and never
- * resolves empty after a successful connect: a window that fails to load keeps the
- * previous one playing instead of stalling the swarm.
+ * stays in the LRU. Never rejects. `null` = Supabase can't supply this flow at
+ * all (first failure, sticky for the page); `[]` = the flow connected but this
+ * window failed to load — the key is forgotten so asking again retries, and the
+ * source answers an empty batch, which parks its schedule.
+ *
+ * `legacyRefresh` is the deprecated window-less path, which refreshes through the
+ * page-wide timer rather than a lease.
  */
-function reservoirFor(flow: OdFlow, range: HourRange): Promise<Leg[] | null> {
+function reservoirFor(
+  flow: OdFlow,
+  range: HourRange,
+  legacyRefresh = false,
+): Promise<Leg[] | null> {
   const state = stateFor(flow.id)
   const key = rangeKey(range)
   const cached = state.reservoirs.get(key)
@@ -476,7 +556,6 @@ function reservoirFor(flow: OdFlow, range: HourRange): Promise<Leg[] | null> {
       )
       const legs = batches.flat()
       if (legs.length === 0) throw new Error(`${flow.sampleRpc} returned no usable pairs`)
-      state.live = legs
       if (!state.announced) {
         state.announced = true
         console.info(
@@ -486,7 +565,7 @@ function reservoirFor(flow: OdFlow, range: HourRange): Promise<Leg[] | null> {
       } else {
         console.debug(`${tag} ${key}h — ${legs.length} weighted OD samples`)
       }
-      armRefresh(state, client, flow)
+      if (legacyRefresh) armRefresh(state, flow)
       return legs
     } catch (err) {
       if (!state.announced) {
@@ -496,10 +575,11 @@ function reservoirFor(flow: OdFlow, range: HourRange): Promise<Leg[] | null> {
         return null
       }
       // Already connected once, so this is the window's problem, not the flow's:
-      // forget it (re-selecting retries) and keep the last loaded one playing.
-      console.debug(`${tag} ${key}h unavailable, keeping the previous window —`, err)
+      // forget it (asking again retries) and answer empty, which parks the
+      // sources on this window rather than showing them some other window's trips.
+      console.debug(`${tag} ${key}h unavailable —`, err)
       if (state.reservoirs.get(key) === loading) state.reservoirs.delete(key)
-      return state.live
+      return []
     }
   })()
   state.reservoirs.set(key, loading)
@@ -508,6 +588,16 @@ function reservoirFor(flow: OdFlow, range: HourRange): Promise<Leg[] | null> {
 }
 
 export interface OdTripOptions {
+  /**
+   * The time-of-day window this source samples in, fixed for its lifetime — a
+   * panel that changes window builds a new source (and schedule). Clamped like
+   * `setOdHourRange`. The source leases the window's reservoir until `dispose()`.
+   *
+   * Optional only while the page-wide dashboard remains: without it the source
+   * samples in the flow's `setOdHourRange` window, read per batch, and holds no
+   * lease. That path is deprecated; new callers always pass a range.
+   */
+  range?: HourRange
   /**
    * Supplies trips when Supabase is unconfigured or unreachable. Without one the
    * source returns nothing and the flow simply doesn't draw.
@@ -519,15 +609,23 @@ export interface OdTripOptions {
 }
 
 /**
- * Trips sampled from a flow's real OD pairs, in whatever time-of-day window that
- * flow is set to when the batch is requested. Never rejects — TripQueue retries a
- * rejecting source forever — so any failure is handed to `fallback`, or answered
- * with an empty batch (which parks the flow for this page load).
+ * Trips sampled from a flow's real OD pairs in one time-of-day window. Never
+ * rejects — TripQueue retries a rejecting source forever. When Supabase can't
+ * supply the flow at all, batches come from `fallback` (or are empty); when just
+ * this window fails to load after a successful connect, the batch is empty, which
+ * parks the schedule — re-selecting the window builds a new source and retries.
+ *
+ * `dispose()` releases the reservoir lease; idempotent, and called once by the
+ * schedule that plays this source when its last panel lets go.
  */
 export function odTripSource(flow: OdFlow, opts: OdTripOptions = {}): TripSource {
   const { fallback, seed = 0x5e0e1, speedMps = [500, 900] } = opts
   const rand = mulberry32(seed)
   const [minLng, minLat, maxLng, maxLat] = SEOUL_BOUNDS
+  const state = stateFor(flow.id)
+  const range = opts.range ? clampHourRange(opts.range[0], opts.range[1]) : null
+  if (range) acquireLease(state, flow, range)
+  let disposed = false
 
   /** A point for this endpoint: the place itself, or uniform in its disc. */
   const locate = (place: Place): [number, number] => {
@@ -541,11 +639,13 @@ export function odTripSource(flow: OdFlow, opts: OdTripOptions = {}): TripSource
 
   return {
     next: async (count) => {
-      // Read this flow's window at call time, not at construction: the source
-      // outlives every change to it, and the pool it feeds was flushed for
-      // exactly this.
-      const legs = await reservoirFor(flow, stateFor(flow.id).range)
-      if (!legs || legs.length === 0) return fallback ? fallback.next(count) : []
+      // A ranged source samples its own window; the deprecated window-less one
+      // reads the flow's page-wide window per batch, so it follows the slider.
+      const legs = range
+        ? await reservoirFor(flow, range)
+        : await reservoirFor(flow, state.range, true)
+      if (legs === null) return fallback ? fallback.next(count) : []
+      if (legs.length === 0) return []
       return Array.from({ length: count }, (): Trip => {
         let origin: [number, number]
         let destination: [number, number]
@@ -560,6 +660,11 @@ export function odTripSource(flow: OdFlow, opts: OdTripOptions = {}): TripSource
         const speed = (speedMps[0] + rand() * (speedMps[1] - speedMps[0])) * flow.speedScale
         return { origin, destination, durationSec: meters / speed }
       })
+    },
+    dispose: () => {
+      if (disposed) return
+      disposed = true
+      if (range) releaseLease(state, rangeKey(range))
     },
   }
 }

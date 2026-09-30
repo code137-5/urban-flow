@@ -11,8 +11,10 @@ import type { Trip, TripSource } from '../data/trips'
  * `dispose()` is dropped.
  *
  * `flush()` throws the pool away when what the source would answer has changed
- * (the page-wide OD hour window); everything in flight at that moment belongs to
- * the old answer and is discarded too, which `generation` keeps track of.
+ * (the scatter knob moved); everything in flight at that moment belongs to the
+ * old answer and is discarded too, which `generation` keeps track of. `dispose()`
+ * ends the queue for good when its schedule is torn down: the pool is dropped,
+ * `prime()` exits, `take()` answers null and nothing goes out again.
  */
 export class TripQueue {
   private pool: Trip[] = []
@@ -63,10 +65,11 @@ export class TripQueue {
 
   /**
    * Drop every prefetched trip because the source now answers something else —
-   * today, the page-wide OD hour window moved. A request already in flight was
-   * asked under the old window, so its result is discarded when it lands, and a
-   * fresh one goes out immediately. Particles already flying are untouched: they
-   * finish their trip and pick up the new window afterwards.
+   * today, the `?tune` scatter knob moved (an hour window change is a different
+   * schedule altogether, not a flush). A request already in flight was asked
+   * under the old answer, so its result is discarded when it lands, and a fresh
+   * one goes out immediately. Particles already flying are untouched: they
+   * finish their trip and pick up the new answer afterwards.
    *
    * The pool is legitimately empty for one round trip afterwards, so `flushing`
    * keeps the dry-source warning quiet until the refill lands.
@@ -80,6 +83,11 @@ export class TripQueue {
     void this.refill()
   }
 
+  /**
+   * The schedule is being disposed (its last panel released it): drop the pool
+   * and stop asking the source. A request in flight is discarded when it lands.
+   * Idempotent.
+   */
   dispose(): void {
     this.disposed = true
     this.pool = []

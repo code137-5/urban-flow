@@ -23,9 +23,15 @@ export interface Trip {
  * batches (~200 at a time) whenever its prefetch pool runs low, so an
  * implementation must be safe to call repeatedly. It may return fewer than
  * `count` (or none) when it has nothing more to give.
+ *
+ * `dispose` is called once when the schedule playing this source is torn down
+ * (its last panel released it), so a source holding page-level resources — an
+ * OD reservoir lease and its refresh timer — can let them go. Must be
+ * idempotent; a source with nothing to release simply omits it.
  */
 export interface TripSource {
   next(count: number): Promise<Trip[]>
+  dispose?(): void
 }
 
 /** Deterministic RNG — reproducible trips make Playwright screenshots comparable. */

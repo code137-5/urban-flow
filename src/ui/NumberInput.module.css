@@ -1,0 +1,83 @@
+/* Carbon number input, Gray 100 dark. Sits on --layer-01, so the field steps
+   up to --field-02; flat corners, one strong bottom hairline, and the focus
+   ring drawn around the whole control (field + steppers), inset so it is never
+   clipped by a parent. */
+.root {
+  display: inline-flex;
+  align-items: stretch;
+  height: var(--control-height-sm);
+  background: var(--field-02);
+  border-bottom: 1px solid var(--border-strong);
+  border-radius: 0;
+}
+
+.root:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.input {
+  width: 8ch;
+  min-width: 0;
+  margin: 0;
+  padding: 0 var(--space-xs) 0 var(--space-sm);
+  font: var(--type-body-sm);
+  letter-spacing: 0.16px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+}
+
+.stepper {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height-sm);
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-primary);
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  cursor: pointer;
+  transition: background var(--duration-fast-01) var(--ease-standard);
+}
+
+/* 1px × 16px divider on each stepper's left edge — between field and −, and
+   between − and +. */
+.stepper::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 1px;
+  height: 16px;
+  transform: translateY(-50%);
+  background: var(--border-subtle-02);
+}
+
+.stepper:hover:not(:disabled) {
+  background: var(--field-hover-02);
+}
+
+.stepper:disabled {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}
+
+.disabled {
+  border-bottom-color: transparent;
+}
+
+.disabled .input {
+  color: var(--text-disabled);
+  cursor: not-allowed;
+}

@@ -18,6 +18,7 @@
   --layer-hover-01: #333333;
   --field-01: #262626; /* inputs */
   --field-02: #393939;
+  --field-hover-02: #474747; /* hover step on --field-02 (number-input steppers) */
 
   /* ---- Text ---- */
   --text-primary: #f4f4f4;
