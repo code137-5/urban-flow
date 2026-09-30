@@ -1,11 +1,12 @@
-/* Carbon number input, Gray 100 dark. Sits on --layer-01, so the field steps
-   up to --field-02; flat corners, one strong bottom hairline, and the focus
-   ring drawn around the whole control (field + steppers), inset so it is never
+/* Carbon number input, Gray 100 dark, at the dense 24px size (it sits inside a
+   caption line, a user decision). Sits on --layer-01, so the field steps up to
+   --field-02; flat corners, one strong bottom hairline, and the focus ring
+   drawn around the whole control (field + steppers), inset so it is never
    clipped by a parent. */
 .root {
   display: inline-flex;
   align-items: stretch;
-  height: var(--control-height-sm);
+  height: var(--control-height-xs);
   background: var(--field-02);
   border-bottom: 1px solid var(--border-strong);
   border-radius: 0;
@@ -17,12 +18,12 @@
 }
 
 .input {
-  width: 8ch;
+  width: 7.5ch; /* "100,000" in tabular caption digits, plus the left inset */
   min-width: 0;
   margin: 0;
-  padding: 0 var(--space-xs) 0 var(--space-sm);
-  font: var(--type-body-sm);
-  letter-spacing: 0.16px;
+  padding: 0 var(--space-2xs) 0 var(--space-xs);
+  font: var(--type-caption);
+  letter-spacing: 0.32px;
   font-variant-numeric: tabular-nums;
   color: var(--text-primary);
   background: transparent;
@@ -37,11 +38,11 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: var(--control-height-sm);
+  width: 22px;
   margin: 0;
   padding: 0;
   font-family: var(--font-sans);
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1;
   color: var(--text-primary);
   background: transparent;
@@ -51,7 +52,7 @@
   transition: background var(--duration-fast-01) var(--ease-standard);
 }
 
-/* 1px × 16px divider on each stepper's left edge — between field and −, and
+/* 1px × 12px divider on each stepper's left edge — between field and −, and
    between − and +. */
 .stepper::before {
   content: '';
@@ -59,7 +60,7 @@
   left: 0;
   top: 50%;
   width: 1px;
-  height: 16px;
+  height: 12px;
   transform: translateY(-50%);
   background: var(--border-subtle-02);
 }

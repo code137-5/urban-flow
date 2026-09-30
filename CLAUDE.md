@@ -164,7 +164,8 @@ grid) are reprojected with `scripts/preprocess/proj.ts` (proj4, dev-only).
 - `src/data/types.ts` — `GeoPoint`, `DataSource`, `DatasetId`, `Bounds`. The contract every
   layer depends on. Datasets are source-agnostic weighted geopoints (+ optional `weightByHour`
   length-24 for the time-of-day scrubber).
-- `src/config.ts` — Seoul `INITIAL_VIEW_STATE` (pitch 60, the "contour poster" look),
+- `src/config.ts` — Seoul `INITIAL_VIEW_STATE` (top-down, north-up — a user decision; the
+  panel's 2D/3D toggle tilts to the pitched "contour poster" look),
   `SEOUL_BOUNDS`, `BG_COLOR`. No basemap — deck.gl renders on the plain dark canvas.
 - `src/sections/` — landing sections (`Hero`, `About`) and the dashboard: `Dashboard` (panel
   list, committed per-panel flow settings, hour totals, `activeLayers`), `PanelControls` (a

@@ -503,7 +503,10 @@ try {
         for (const [name, tb] of containers) {
           const els = [tb, ...tb.querySelectorAll('*')]
           const desc = (e) => `${e.tagName}.${e.className} sw=${e.scrollWidth}/${e.clientWidth} sh=${e.scrollHeight}/${e.clientHeight} "${(e.textContent || '').slice(0, 28)}"`
-          const over = els.filter((e) => e.clientWidth > 0 && (e.scrollWidth > e.clientWidth + 1 || e.scrollHeight > e.clientHeight + 1))
+          // Visually-hidden text (the 1px clip-path readout for assistive tech)
+          // overflows its box by design and is skipped.
+          const srOnly = (e) => e.clientWidth <= 1 && e.clientHeight <= 1
+          const over = els.filter((e) => e.clientWidth > 0 && !srOnly(e) && (e.scrollWidth > e.clientWidth + 1 || e.scrollHeight > e.clientHeight + 1))
           // Ellipsis is truncation by design (the flow label in a narrow
           // strip) — reported, not failed.
           const truncated = over.filter((e) => getComputedStyle(e).textOverflow === 'ellipsis').map(desc)

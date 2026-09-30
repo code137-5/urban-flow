@@ -40,12 +40,10 @@ const GRID_SIZE = 200
 
 // Fallback view used before the container has been measured (0×0 during the
 // first render, before layout). The shared INITIAL_VIEW_STATE frames Seoul for a
-// full-screen canvas; inside a bounded panel it reads low, so tighten zoom and
-// drop the center a touch. Once measured, `fitSeoulViewState` replaces this with
-// a size-fitted camera.
+// full-screen canvas; inside a bounded panel it reads small, so tighten zoom.
+// Once measured, `fitSeoulViewState` replaces this with a size-fitted camera.
 const PANEL_VIEW_STATE = {
   ...INITIAL_VIEW_STATE,
-  latitude: 37.535,
   zoom: 10.9,
 }
 

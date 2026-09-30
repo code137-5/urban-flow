@@ -111,33 +111,6 @@ function FlowRow({ flow, panelKey, n, settings, particles, live, onChange }: Flo
         />
         <span className={styles.flowLabel}>{flow.label}</span>
       </label>
-      <span
-        className={[
-          styles.hourValue,
-          pending ? styles.hourPending : '',
-          disabled ? styles.hourDisabled : '',
-        ]
-          .filter(Boolean)
-          .join(' ')}
-      >
-        {formatHour(shown[0])}–{formatHour(shown[1])}
-      </span>
-      {/* Double-click the track to send this flow back to 07–10 — this panel only. */}
-      <RangeSlider
-        className={styles.hourSlider}
-        min={0}
-        max={24}
-        step={1}
-        minGap={1}
-        value={shown}
-        onChange={setDraft}
-        ticks={HOUR_TICKS}
-        formatValue={formatHour}
-        formatBound={formatHourBound}
-        ariaLabels={[`${label} start hour`, `${label} end hour`]}
-        onReset={() => setDraft([DEFAULT_HOUR_RANGE[0], DEFAULT_HOUR_RANGE[1]])}
-        disabled={disabled}
-      />
       <div
         className={[styles.flowScale, disabled ? styles.hourDisabled : '']
           .filter(Boolean)
@@ -157,8 +130,38 @@ function FlowRow({ flow, panelKey, n, settings, particles, live, onChange }: Flo
           ariaLabel={`${label} trips per particle`}
           onChange={(v) => onChange(panelKey, flow.id, { tripsPerParticle: v })}
         />
-        <span>{flow.tripUnit}</span>
+        <span className={styles.unit}>{flow.tripUnit}</span>
       </div>
+      {/* Double-click the track to send this flow back to 07–10 — this panel only. */}
+      <RangeSlider
+        className={styles.hourSlider}
+        min={0}
+        max={24}
+        step={1}
+        minGap={1}
+        value={shown}
+        onChange={setDraft}
+        ticks={HOUR_TICKS}
+        formatValue={formatHour}
+        formatBound={formatHourBound}
+        ariaLabels={[`${label} start hour`, `${label} end hour`]}
+        onReset={() => setDraft([DEFAULT_HOUR_RANGE[0], DEFAULT_HOUR_RANGE[1]])}
+        disabled={disabled}
+        thumbLabels
+      />
+      {/* The window as one sentence for assistive tech (and the harness): the
+          visible hours sit under the thumbs themselves. */}
+      <span
+        className={[
+          styles.hourValue,
+          pending ? styles.hourPending : '',
+          disabled ? styles.hourDisabled : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      >
+        {formatHour(shown[0])}–{formatHour(shown[1])}
+      </span>
     </div>
   )
 }

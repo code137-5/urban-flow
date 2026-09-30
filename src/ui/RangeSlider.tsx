@@ -1,7 +1,10 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent, PointerEvent } from 'react'
 import { snapClamp } from './snap'
 import styles from './RangeSlider.module.css'
+
+/** Two centred caption labels need this much rail between the thumbs (px). */
+const THUMB_LABEL_CLEARANCE_PX = 44
 
 export interface RangeSliderProps {
   min: number
@@ -25,6 +28,13 @@ export interface RangeSliderProps {
   showBounds?: boolean
   /** Called on a double-click of the track; omit to disable reset. */
   onReset?: () => void
+  /**
+   * Print each thumb's `formatValue` right under it (a user decision: the hours
+   * read where the hand is, not in a separate readout). Reserves one caption
+   * line below the rail. When the thumbs sit closer than a label, the lower
+   * label leans left and the upper leans right so they never overlap.
+   */
+  thumbLabels?: boolean
   className?: string
 }
 
@@ -54,11 +64,23 @@ export function RangeSlider({
   ticks,
   showBounds = true,
   onReset,
+  thumbLabels = false,
   className,
 }: RangeSliderProps) {
   const [lower, upper] = value
   const [active, setActive] = useState<0 | 1 | null>(null)
   const geometryRef = useRef<HTMLDivElement | null>(null)
+  // Rail width in px, only tracked when thumb labels need to know whether the
+  // two labels would collide (a label is ~5 caption glyphs).
+  const [railWidth, setRailWidth] = useState(0)
+  useEffect(() => {
+    if (!thumbLabels) return
+    const el = geometryRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(([entry]) => setRailWidth(entry.contentRect.width))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [thumbLabels])
   const thumbRefs = useRef<Array<HTMLDivElement | null>>([null, null])
   // Set between pointerdown and pointerup/-cancel: which thumb is being dragged
   // and the pointer that grabbed it, so a second finger cannot hijack the drag.
@@ -187,7 +209,31 @@ export function RangeSlider({
     )
   }
 
-  const rootClass = [styles.root, disabled ? styles.disabled : '', className ?? '']
+  // Labels collide once the thumbs are closer than one label plus a gap.
+  const labelsClash =
+    thumbLabels && span > 0 && ((upper - lower) / span) * railWidth < THUMB_LABEL_CLEARANCE_PX
+  const renderThumbLabel = (index: 0 | 1) => {
+    if (!thumbLabels) return null
+    const v = index === 0 ? lower : upper
+    const lean = labelsClash ? (index === 0 ? styles.thumbValueLeft : styles.thumbValueRight) : ''
+    return (
+      <span
+        key={`label-${index}`}
+        className={`${styles.thumbValue}${active === index ? ` ${styles.thumbValueActive}` : ''}${lean ? ` ${lean}` : ''}`}
+        style={{ left: `${pct(v)}%` }}
+        aria-hidden="true"
+      >
+        {formatValue(v)}
+      </span>
+    )
+  }
+
+  const rootClass = [
+    styles.root,
+    disabled ? styles.disabled : '',
+    thumbLabels ? styles.labeled : '',
+    className ?? '',
+  ]
     .filter(Boolean)
     .join(' ')
 
@@ -213,6 +259,8 @@ export function RangeSlider({
           ))}
           {renderThumb(0)}
           {renderThumb(1)}
+          {renderThumbLabel(0)}
+          {renderThumbLabel(1)}
         </div>
       </div>
       {showBounds ? <span className={styles.bound}>{boundLabel(max)}</span> : null}
