@@ -319,8 +319,9 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     for (let p = 0; p < seen.length; p++) {
       const version = schedule.versions[p] ?? 0 // 0 = the source gave nothing; stays hidden
       if (version === seen[p]) continue
-      seen[p] = version
       const trip = schedule.trips[p]
+      if (!trip) continue // versions/trips are filled together; never expected, but never crash
+      seen[p] = version
       const [ou, ov] = toUv(trip.origin[0], trip.origin[1])
       const [du, dv] = toUv(trip.destination[0], trip.destination[1])
       tripData[p * TRIP_STRIDE] = ou
@@ -431,7 +432,13 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     this.state.timerId = setTimeout(() => {
       this.state.stepScheduled = false
       this.state.timerId = undefined
-      this._step()
+      // deck matches each new props object to a NEW layer instance and hands
+      // it this same `state`; the instance that armed the timer keeps its old
+      // props. Stepping on it would tick the old schedule against buffers sized
+      // for the new one (a stale 34-slot schedule vs 101 seen slots → undefined
+      // trip). Always step the instance that currently owns the state.
+      const live = (this.getCurrentLayer() as ParticleLayer | null) ?? this
+      live._step()
     }, 1000 / this.props.maxFps!)
   }
 
