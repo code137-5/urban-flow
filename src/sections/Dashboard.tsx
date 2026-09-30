@@ -1,50 +1,40 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Container, Section, Eyebrow } from '../ui/layout'
 import { DEFAULT_SOURCE, SOURCES, getSource } from '../data/sources'
 import type { DatasetId } from '../data/types'
-import { DEFAULT_HOUR_RANGE, FLOWS, odConfigured, setOdHourRange } from '../data/odTrips'
+import { FLOWS, loadOdHourTotals, odConfigured } from '../data/odTrips'
 import type { FlowId } from '../data/odTrips'
-import { PARTICLES_PER_FLOW } from '../layers/particleBudget'
-import { resetSharedTripSchedules } from '../layers/tripSchedule'
-import { RangeSlider } from '../ui/RangeSlider'
+import { PanelControls } from './PanelControls'
+import { DEFAULT_PANEL_FLOWS, resolvePanelFlows } from './panelSettings'
+import type { FlowSettings, PanelFlow, PanelFlows } from './panelSettings'
 import { TerrainPanel } from './TerrainPanel'
 import type { PanelCamera } from './TerrainPanel'
 import styles from './Dashboard.module.css'
 
 /**
- * A dashboard panel is described by a stable key plus the id of the dataset it
- * shows. The key is a monotonically-increasing counter (never Math.random /
- * Date.now — those break reconciliation and are forbidden in this env), so React
- * keeps each panel's deck.gl instance stable across add/remove. `sourceId`
- * drives which `DataSource` the panel renders and its header copy, selectable
- * per panel via the header dropdown.
+ * A dashboard panel is described by a stable key, the id of the dataset it
+ * shows and its particle-flow settings. The key is a monotonically-increasing
+ * counter (never Math.random / Date.now — those break reconciliation and are
+ * forbidden in this env), so React keeps each panel's deck.gl instance stable
+ * across add/remove. `sourceId` drives which `DataSource` the panel renders and
+ * its header copy, selectable per panel via the header dropdown. `flows` holds
+ * the COMMITTED per-flow settings (on/off, hour window, trips per particle) —
+ * PanelControls debounces the thumbs itself, so mid-drag values never land here.
  */
 interface PanelDescriptor {
   key: number
   sourceId: DatasetId
+  flows: PanelFlows
 }
 
 /** Two full rows of three. */
 const MAX_PANELS = 6
 
-const DEFAULT_FLOWS_ON = Object.fromEntries(FLOWS.map((f) => [f.id, f.defaultOn])) as Record<
+const NO_TOTALS = Object.fromEntries(FLOWS.map((f) => [f.id, null])) as Record<
   FlowId,
-  boolean
+  number[] | null
 >
-
-/** Debounce on the hour thumbs: each committed change refetches that flow's reservoir. */
-const HOUR_COMMIT_MS = 200
-/** Both flows open on the same window; from here on each moves independently. */
-const DEFAULT_HOUR_RANGES = Object.fromEntries(
-  FLOWS.map((f) => [f.id, [DEFAULT_HOUR_RANGE[0], DEFAULT_HOUR_RANGE[1]]]),
-) as Record<FlowId, [number, number]>
-/** Quiet marks at 06 / 12 / 18 so the 0–24 track reads as a day. */
-const HOUR_TICKS = [6, 12, 18]
-/** 7 → "07:00". The upper extreme reads "24:00" — the window is half-open. */
-const formatHour = (h: number) => `${String(h).padStart(2, '0')}:00`
-/** Bound labels flanking the track stay to the bare 2-digit hour. */
-const formatHourBound = (h: number) => String(h).padStart(2, '0')
 
 /**
  * Carbon responsive column cap by viewport width (md = 672, lg = 1056):
@@ -77,16 +67,20 @@ function useViewportWidth(): number {
  * Aete/seoul-terrain-animation) and grows: "Add a dataset" appends panels into a
  * responsive grid that caps at 3 columns and wraps onto new rows (up to 6 panels
  * total). Panels are removable down to a minimum of one. The global particle
- * budget re-splits across panels on every add/remove (see particleBudget.ts).
- * Every panel plays the same particles in lockstep (layers/tripSchedule.ts);
- * which OD flows are drawn, and which hours of the day each flow is sampled from,
- * are dashboard-wide choices — the same for every panel, so panels stay
- * comparable. The hours are per flow, though: bike at 07–10 next to living
- * migration at 17–20 is a comparison worth being able to make.
+ * budget re-splits across every active (panel, flow) layer on each change (see
+ * particleBudget.ts).
+ *
+ * Particle settings are PER PANEL: each panel's control strip (PanelControls)
+ * picks, per flow, whether it is drawn, which hours of the day its OD pairs come
+ * from, and how many trips one particle stands for — so "bike 07–10" can sit
+ * beside "bike 17–20". Panels whose settings are identical share one trip
+ * schedule (layers/tripSchedule.ts) and move in lockstep; a panel with its own
+ * window runs its own. A new panel copies the previous panel's settings, so it
+ * joins that panel's swarm mid-flight until the user changes something.
  */
 export function Dashboard() {
   const [panels, setPanels] = useState<PanelDescriptor[]>(() => [
-    { key: 0, sourceId: DEFAULT_SOURCE.meta.id },
+    { key: 0, sourceId: DEFAULT_SOURCE.meta.id, flows: DEFAULT_PANEL_FLOWS },
   ])
   // Next stable key to hand out. Kept in a ref so it survives re-renders without
   // triggering one; StrictMode may skip a value, which is harmless (uniqueness,
@@ -105,49 +99,74 @@ export function Dashboard() {
   // comparisons line up out of the box. The toggle stays disabled until a second
   // panel exists (nothing to sync with one panel).
   const [linked, setLinked] = useState(true)
-  // Particle flows drawn in every panel, each its own color. TerrainPanel takes a
-  // count per flow, where 0 means "off" — the count itself is fixed now, so the
-  // toggles are all that move it.
-  const [flowsOn, setFlowsOn] = useState<Record<FlowId, boolean>>(DEFAULT_FLOWS_ON)
-  const flows = useMemo<Record<FlowId, number>>(
-    () => ({
-      bike: flowsOn.bike ? PARTICLES_PER_FLOW : 0,
-      migration: flowsOn.migration ? PARTICLES_PER_FLOW : 0,
-    }),
-    [flowsOn],
-  )
 
-  // One time-of-day window per flow, half-open [from, to) in whole hours.
-  // `hourRanges` tracks the thumbs live; `committedHours` follows once the drag
-  // settles, because every committed change refetches that flow's OD reservoir.
-  const [hourRanges, setHourRanges] =
-    useState<Record<FlowId, [number, number]>>(DEFAULT_HOUR_RANGES)
-  const [committedHours, setCommittedHours] = useState(hourRanges)
+  // Trips per hour of day, per flow — 24 numbers each, page-wide (the totals
+  // are a property of the dataset, not of any panel). Both flows load on mount
+  // so a panel switching a flow on gets its proportional count at once. null =
+  // not loaded, or Supabase can't supply them.
+  const [hourTotals, setHourTotals] = useState(NO_TOTALS)
   useEffect(() => {
-    const id = setTimeout(() => setCommittedHours(hourRanges), HOUR_COMMIT_MS)
-    return () => clearTimeout(id)
-  }, [hourRanges])
-  // The windows are page-wide module state inside odTrips.ts — deliberately NOT a
-  // TerrainPanel prop and NOT part of the shared-schedule key: re-keying would
-  // rebuild every ParticleLayer's GPU state on each change. A new window instead
-  // resets the flow's schedules in place (user decision): its particles and their
-  // trails are cleared at once and the swarm re-forms from the new hours, so what
-  // is on screen never mixes two windows. The keys are
-  // `${flow}|${speed}|${timeScale}`, so the `${flow.id}|` prefix resets exactly
-  // the schedules that just changed window — moving the bike thumbs must not
-  // clear or refetch living migration. Seeding the state from DEFAULT_HOUR_RANGE makes
-  // `setOdHourRange` a no-op on mount, so nothing is reset until the user
-  // actually moves a thumb.
-  useEffect(() => {
+    let alive = true
     for (const flow of FLOWS) {
-      const [from, to] = committedHours[flow.id]
-      if (setOdHourRange(flow.id, from, to)) resetSharedTripSchedules(`${flow.id}|`)
+      void loadOdHourTotals(flow.id).then((totals) => {
+        if (alive && totals) setHourTotals((prev) => ({ ...prev, [flow.id]: totals }))
+      })
     }
-  }, [committedHours])
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  // The one updater every PanelControls reports through. Stable (no deps) so the
+  // strips' debounce effects don't re-arm on every dashboard render, and it
+  // returns `prev` when the patch changes nothing — a repeated or
+  // StrictMode-doubled commit must not re-key anything.
+  const changeFlow = useCallback((key: number, flowId: FlowId, patch: Partial<FlowSettings>) => {
+    setPanels((prev) => {
+      const panel = prev.find((p) => p.key === key)
+      if (!panel) return prev
+      const cur = panel.flows[flowId]
+      const next: FlowSettings = {
+        on: patch.on ?? cur.on,
+        hours: patch.hours ?? cur.hours,
+        tripsPerParticle: patch.tripsPerParticle ?? cur.tripsPerParticle,
+      }
+      if (
+        next.on === cur.on &&
+        next.tripsPerParticle === cur.tripsPerParticle &&
+        next.hours[0] === cur.hours[0] &&
+        next.hours[1] === cur.hours[1]
+      ) {
+        return prev
+      }
+      const flows: PanelFlows = { ...panel.flows, [flowId]: next }
+      return prev.map((p) => (p.key === key ? { ...p, flows } : p))
+    })
+  }, [])
+
+  // What each panel actually draws: particles per flow (0 = off; ∝ the trips in
+  // its window ÷ its trips per particle once the totals are known) plus the
+  // window itself. Memoised as one map so a panel's `flows` prop keeps its
+  // identity between commits that touch neither the panels nor the totals —
+  // TerrainPanel keys its schedules on it. (Any panel edit rebuilds every
+  // panel's record; the other panels then re-run their layer memos, which is
+  // cheap — deck diffs the props and touches no GPU state — so no per-panel
+  // caching.)
+  const resolved = useMemo(() => {
+    const map = new Map<number, Record<FlowId, PanelFlow>>()
+    for (const p of panels) map.set(p.key, resolvePanelFlows(p.flows, hourTotals))
+    return map
+  }, [panels, hourTotals])
+  // Every (panel, flow) layer that draws splits the global particle budget.
+  let activeLayers = 0
+  for (const r of resolved.values()) {
+    for (const flow of FLOWS) if (r[flow.id].particles > 0) activeLayers += 1
+  }
 
   // Without Supabase env the flows fall back to random trips, where an hour
-  // window means nothing — so say so and lock the slider. Optimistic until the
-  // check resolves, which keeps the common (configured) path from flickering.
+  // window (and a trips-per-particle) means nothing — so say so and lock those
+  // controls. Optimistic until the check resolves, which keeps the common
+  // (configured) path from flickering.
   const [odLive, setOdLive] = useState(true)
   useEffect(() => {
     let alive = true
@@ -164,10 +183,6 @@ export function Dashboard() {
   }, [])
 
   const firstKey = panels[0]?.key ?? 0
-
-  /** Move one flow's thumbs; the debounce above turns this into a refetch. */
-  const setFlowHours = (flowId: FlowId) => (next: [number, number]) =>
-    setHourRanges((prev) => ({ ...prev, [flowId]: next }))
 
   const cameraFor = (key: number): PanelCamera | null => cameras[linked ? firstKey : key] ?? null
 
@@ -199,12 +214,16 @@ export function Dashboard() {
     })
   }
 
+  // A new panel copies the previous panel's flow settings (user decision): the
+  // most likely next comparison is "the same, but one thing different". Sharing
+  // the settings object is safe — every update replaces it immutably.
   const addPanel = () => {
     setPanels((prev) => {
       if (prev.length >= MAX_PANELS) return prev
       const key = nextKey.current
       nextKey.current += 1
-      return [...prev, { key, sourceId: DEFAULT_SOURCE.meta.id }]
+      const flows = prev[prev.length - 1]?.flows ?? DEFAULT_PANEL_FLOWS
+      return [...prev, { key, sourceId: DEFAULT_SOURCE.meta.id, flows }]
     })
   }
 
@@ -239,77 +258,12 @@ export function Dashboard() {
           three across, then wraps to a second row — up to six panels. Remove any panel to refocus.
         </p>
 
+        {/* One thin row: the no-Supabase hint (only when it applies — the cause
+            is the build's missing env, the same for every panel and flow) on the
+            left, the view option on the right. Everything per flow lives in each
+            panel's own strip. */}
         <div className={styles.toolbar}>
-          {/* One row per flow: its on/off switch (the swatch doubles as the
-              legend) · its own time-of-day window · its readout. The three
-              columns live on .flowRows, not on the rows, so both rails start and
-              end at the same x despite the labels' different widths. No "Time of
-              day" caption: the 00–24 bounds, the 06/12/18 ticks and the "07:00–
-              10:00" readout already say what the rail is, twice over per row. */}
-          <div className={styles.flowRows} role="group" aria-label="Particle flows">
-            {FLOWS.map((flow) => {
-              const live = hourRanges[flow.id]
-              const committed = committedHours[flow.id]
-              // The hours mean nothing for a flow that isn't drawn, and nothing
-              // at all without Supabase (the fallback trips are synthetic).
-              const hoursDisabled = !odLive || !flowsOn[flow.id]
-              const hoursPending = live[0] !== committed[0] || live[1] !== committed[1]
-              return (
-                <div className={styles.flowRow} key={flow.id}>
-                  <label className={styles.syncToggle}>
-                    <input
-                      type="checkbox"
-                      className={styles.syncCheckbox}
-                      checked={flowsOn[flow.id]}
-                      onChange={() =>
-                        setFlowsOn((prev) => ({ ...prev, [flow.id]: !prev[flow.id] }))
-                      }
-                    />
-                    <span
-                      className={styles.flowSwatch}
-                      style={{ background: flow.color }}
-                      aria-hidden="true"
-                    />
-                    <span>{flow.label}</span>
-                  </label>
-                  {/* Double-click this flow's track to send it back to 07–10 —
-                      only this flow; the other one's window is untouched. */}
-                  <RangeSlider
-                    className={styles.hourSlider}
-                    min={0}
-                    max={24}
-                    step={1}
-                    minGap={1}
-                    value={live}
-                    onChange={setFlowHours(flow.id)}
-                    ticks={HOUR_TICKS}
-                    formatValue={formatHour}
-                    formatBound={formatHourBound}
-                    ariaLabels={[`${flow.label} start hour`, `${flow.label} end hour`]}
-                    onReset={() =>
-                      setFlowHours(flow.id)([DEFAULT_HOUR_RANGE[0], DEFAULT_HOUR_RANGE[1]])
-                    }
-                    disabled={hoursDisabled}
-                  />
-                  <span
-                    className={[
-                      styles.hourValue,
-                      hoursPending ? styles.hourPending : '',
-                      hoursDisabled ? styles.hourDisabled : '',
-                    ]
-                      .filter(Boolean)
-                      .join(' ')}
-                  >
-                    {formatHour(live[0])}–{formatHour(live[1])}
-                  </span>
-                </div>
-              )
-            })}
-            {/* One hint for the toolbar, not one per row — the cause is the
-                build's missing Supabase env, which is the same for both flows. */}
-            {odLive ? null : <span className={styles.hourHint}>Live OD data unavailable</span>}
-          </div>
-
+          {odLive ? null : <span className={styles.hourHint}>Live OD data unavailable</span>}
           <label className={`${styles.syncToggle} ${styles.syncViews}`}>
             <input
               type="checkbox"
@@ -326,6 +280,10 @@ export function Dashboard() {
           {panels.map((panel, index) => {
             const source = getSource(panel.sourceId) ?? DEFAULT_SOURCE
             const { meta } = source
+            const flows = resolved.get(panel.key) ?? resolvePanelFlows(panel.flows, hourTotals)
+            const particles = Object.fromEntries(
+              FLOWS.map((f) => [f.id, flows[f.id].particles]),
+            ) as Record<FlowId, number>
             return (
               <article className={styles.panel} key={panel.key}>
                 <header className={styles.panelHead}>
@@ -363,11 +321,20 @@ export function Dashboard() {
                   </button>
                 </header>
 
+                <PanelControls
+                  panelKey={panel.key}
+                  panelIndex={index}
+                  settings={panel.flows}
+                  particles={particles}
+                  live={odLive}
+                  onChange={changeFlow}
+                />
+
                 <div className={styles.canvas}>
                   <TerrainPanel
                     source={source}
                     flows={flows}
-                    activePanels={panels.length}
+                    activeLayers={Math.max(1, activeLayers)}
                     camera={cameraFor(panel.key)}
                     onCameraChange={handleCameraChange(panel.key)}
                     onResetCamera={handleResetCamera(panel.key)}

@@ -4,12 +4,10 @@
 --
 -- Tables (uploaded by hand):
 --   living_migration          (o_admdong_cd, d_admdong_cd, trips float)      ~179k OD pairs
---   living_migration_adm_dong (admdong_cd, sgis_adm_cd, sgg_nm, admdong_nm,
---                              lat, lon, out_trips, in_trips)                 426 dongs
+--   (dong centroids are no longer a table: the 426 representative points ship as
+--    public/data/living-migration-dongs.json in the site repo)
 
 -- 1. Read-only public access (already applied; kept here for the record).
--- alter table public.living_migration_adm_dong enable row level security;
--- create policy "anon read" on public.living_migration_adm_dong for select to anon using (true);
 
 -- 2. Running total of trips per OD pair, so a uniform draw in [0, total) lands on
 --    a pair with probability ∝ trips. Movement inside one dong is excluded: it is

@@ -123,8 +123,6 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     history?: Buffer[]
     historyHead: number
     stepCount: number
-    /** The schedule's `epoch` this layer's trail ring belongs to. */
-    epoch: number
     /** Static per-slot trip endpoints (UV) and timing; CPU mirrors below. */
     tripBuffer?: Buffer
     timingBuffer?: Buffer
@@ -156,7 +154,6 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     this.state.lastStepTime = 0
     this.state.historyHead = 0
     this.state.stepCount = 0
-    this.state.epoch = 0
     this.state.setupToken = 0
     this.state.simTime = 0
   }
@@ -290,7 +287,6 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     this.state.history = history
     this.state.historyHead = 0
     this.state.stepCount = 0
-    this.state.epoch = this.props.schedule.epoch
     this.state.tripBuffer = tripBuffer
     this.state.timingBuffer = timingBuffer
     this.state.tripData = tripData
@@ -323,8 +319,9 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     for (let p = 0; p < seen.length; p++) {
       const version = schedule.versions[p] ?? 0 // 0 = the source gave nothing; stays hidden
       if (version === seen[p]) continue
-      seen[p] = version
       const trip = schedule.trips[p]
+      if (!trip) continue // versions/trips are filled together; never expected, but never crash
+      seen[p] = version
       const [ou, ov] = toUv(trip.origin[0], trip.origin[1])
       const [du, dv] = toUv(trip.destination[0], trip.destination[1])
       tripData[p * TRIP_STRIDE] = ou
@@ -435,7 +432,13 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
     this.state.timerId = setTimeout(() => {
       this.state.stepScheduled = false
       this.state.timerId = undefined
-      this._step()
+      // deck matches each new props object to a NEW layer instance and hands
+      // it this same `state`; the instance that armed the timer keeps its old
+      // props. Stepping on it would tick the old schedule against buffers sized
+      // for the new one (a stale 34-slot schedule vs 101 seen slots → undefined
+      // trip). Always step the instance that currently owns the state.
+      const live = (this.getCurrentLayer() as ParticleLayer | null) ?? this
+      live._step()
     }, 1000 / this.props.maxFps!)
   }
 
@@ -464,14 +467,6 @@ export default class ParticleLayer extends Layer<ParticleLayerProps> {
       clearStencil: false,
     })
     this.state.current = 1 - current
-
-    // The schedule was reset (new OD hour window): its slots are parked and
-    // hidden as of this step, so re-seed the trail ring from it — otherwise the
-    // old swarm's ghosts would hang frozen until the ring rotated them out.
-    if (this.props.schedule.epoch !== this.state.epoch) {
-      this.state.epoch = this.props.schedule.epoch
-      this._rebuildHistory()
-    }
 
     // Rotate a state snapshot into the trail ring every `trailGap` steps so the
     // ghost afterimages sit a visible distance behind the live particles.

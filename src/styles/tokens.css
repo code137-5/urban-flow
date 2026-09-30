@@ -18,6 +18,7 @@
   --layer-hover-01: #333333;
   --field-01: #262626; /* inputs */
   --field-02: #393939;
+  --field-hover-02: #474747; /* hover step on --field-02 (number-input steppers) */
 
   /* ---- Text ---- */
   --text-primary: #f4f4f4;
@@ -98,6 +99,7 @@
   --ease-exit: cubic-bezier(0.2, 0, 1, 0.9); /* exit-productive */
 
   /* ---- Control heights (Carbon field/button sizes) ---- */
+  --control-height-xs: 24px; /* dense in-row field (panel number input) */
   --control-height-sm: 32px; /* sm icon-button */
   --control-height: 40px; /* md field */
   --control-height-lg: 48px; /* lg field/button */

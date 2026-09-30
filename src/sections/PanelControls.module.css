@@ -1,0 +1,111 @@
+/* One panel's particle-flow strip, between the panel head and the canvas.
+   Layout follows the strip's own width (container queries), not the viewport:
+   the same panel is wide in a 1-column grid and narrow in a 3-column one.
+   2 lines: toggle | scale / rail — the hours are printed under the slider's
+   own thumbs (a user decision), so there is no readout line. */
+.flowRows {
+  container: flowrows / inline-size;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.flowRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'toggle scale'
+    'rail rail';
+  align-items: center;
+  column-gap: var(--space-xs);
+}
+
+.flowRow + .flowRow {
+  margin-top: var(--space-xs);
+  padding-top: var(--space-xs);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Full 32px line, so the switch is a proper Carbon target. */
+.toggle {
+  grid-area: toggle;
+  min-width: 0;
+  min-height: var(--control-height-sm);
+}
+
+.flowLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flowSwatch {
+  flex: none;
+  width: 8px;
+  height: 8px;
+}
+
+/* Visually hidden: the one-sentence "07:00–10:00" for screen readers (the
+   thumb labels are aria-hidden) and for the harness's readout selector. */
+.hourValue {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.hourPending {
+  color: var(--text-primary);
+}
+
+/* This flow is off (or there is no live OD data): the readout and the scale dim
+   with the slider. Last of the three, so it wins over the pending brightening. */
+.hourDisabled {
+  color: var(--text-disabled);
+}
+
+.hourSlider {
+  grid-area: rail;
+  min-width: 0;
+}
+
+/* "1 particle ≈ [15,000] trips" — the scale of the encoding, right of the
+   toggle on the first line. */
+.flowScale {
+  grid-area: scale;
+  display: flex;
+  align-items: center;
+  justify-self: end;
+  gap: var(--space-2xs);
+  min-height: var(--control-height-sm);
+  font: var(--type-caption);
+  letter-spacing: 0.16px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--text-helper);
+}
+
+.tpp {
+  flex: none;
+}
+
+/* Narrow strip (three-column grid, phones): the full flow label and the scale
+   cannot share a line, so the scale drops under the toggle and may wrap. */
+@container flowrows (max-width: 439px) {
+  .flowRow {
+    grid-template-areas:
+      'toggle toggle'
+      'scale scale'
+      'rail rail';
+  }
+
+  .flowScale {
+    justify-self: start;
+    flex-wrap: wrap;
+  }
+}

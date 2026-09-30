@@ -103,6 +103,55 @@
   cursor: grabbing;
 }
 
+/* Thumb labels: one caption line under the rail, so the root grows by it and
+   the row reserves the space; the bounds stay on the rail line. */
+.labeled {
+  align-items: flex-start;
+}
+
+.labeled .bound {
+  line-height: var(--control-height-sm);
+}
+
+.labeled .track {
+  height: calc(var(--control-height-sm) + 16px);
+}
+
+/* Keep the rail, fill, ticks and thumbs on the original 32px line. */
+.labeled .rail,
+.labeled .fill,
+.labeled .tick,
+.labeled .thumb {
+  top: calc(var(--control-height-sm) / 2);
+}
+
+.thumbValue {
+  position: absolute;
+  top: calc(var(--control-height-sm) / 2 + 11px);
+  transform: translateX(-50%);
+  font: var(--type-caption);
+  letter-spacing: 0.32px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  pointer-events: none;
+  transition: color var(--duration-fast-02) var(--ease-standard);
+}
+
+.thumbValueActive {
+  color: var(--text-primary);
+}
+
+/* Leaning labels for thumbs that sit closer than a label: the lower one ends
+   at its thumb's left edge, the upper one starts at its thumb's right edge. */
+.thumbValueLeft {
+  transform: translateX(calc(-100% - 7px));
+}
+
+.thumbValueRight {
+  transform: translateX(7px);
+}
+
 .disabled {
   opacity: 0.35;
 }

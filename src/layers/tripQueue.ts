@@ -11,8 +11,10 @@ import type { Trip, TripSource } from '../data/trips'
  * `dispose()` is dropped.
  *
  * `flush()` throws the pool away when what the source would answer has changed
- * (the page-wide OD hour window); everything in flight at that moment belongs to
- * the old answer and is discarded too, which `generation` keeps track of.
+ * (the scatter knob moved); everything in flight at that moment belongs to the
+ * old answer and is discarded too, which `generation` keeps track of. `dispose()`
+ * ends the queue for good when its schedule is torn down: the pool is dropped,
+ * `prime()` exits, `take()` answers null and nothing goes out again.
  */
 export class TripQueue {
   private pool: Trip[] = []
@@ -38,15 +40,24 @@ export class TripQueue {
   }
 
   /**
-   * Pop one trip, or null if the pool is empty. Kicks off a refill when low.
-   * `quiet` skips the dry-source warning, for a caller that expects an empty pool
-   * (a schedule refilling every slot at once after a reset).
+   * The source answered with an empty batch, so this queue will never ask it
+   * again (until a `flush()`): whoever plays from it is stuck. The registry uses
+   * this to hand out a fresh schedule instead of a dead one.
    */
-  take(quiet = false): Trip | null {
+  get parked(): boolean {
+    return this.exhausted && !this.disposed
+  }
+
+  /**
+   * Pop one trip, or null if the pool is empty. Kicks off a refill when low. The
+   * dry-source warning fires once per queue, and not during a flush's refill
+   * round trip, when an empty pool is expected.
+   */
+  take(): Trip | null {
     const lowWater = this.opts.lowWater ?? 100
     if (this.pool.length <= lowWater) void this.refill()
     const trip = this.pool.pop() ?? null
-    if (trip === null && !quiet && !this.warned && !this.flushing) {
+    if (trip === null && !this.warned && !this.flushing) {
       this.warned = true
       console.warn('[urban-flow] trip source has no trips ready; particles re-loop their last trip')
     }
@@ -63,10 +74,11 @@ export class TripQueue {
 
   /**
    * Drop every prefetched trip because the source now answers something else —
-   * today, the page-wide OD hour window moved. A request already in flight was
-   * asked under the old window, so its result is discarded when it lands, and a
-   * fresh one goes out immediately. Particles already flying are untouched: they
-   * finish their trip and pick up the new window afterwards.
+   * today, the `?tune` scatter knob moved (an hour window change is a different
+   * schedule altogether, not a flush). A request already in flight was asked
+   * under the old answer, so its result is discarded when it lands, and a fresh
+   * one goes out immediately. Particles already flying are untouched: they
+   * finish their trip and pick up the new answer afterwards.
    *
    * The pool is legitimately empty for one round trip afterwards, so `flushing`
    * keeps the dry-source warning quiet until the refill lands.
@@ -80,6 +92,11 @@ export class TripQueue {
     void this.refill()
   }
 
+  /**
+   * The schedule is being disposed (its last panel released it): drop the pool
+   * and stop asking the source. A request in flight is discarded when it lands.
+   * Idempotent.
+   */
   dispose(): void {
     this.disposed = true
     this.pool = []

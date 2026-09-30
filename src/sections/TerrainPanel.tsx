@@ -11,7 +11,7 @@ import { parkLayer, riverLayer } from '../layers/featureOverlays'
 import { ContourFallback } from './ContourFallback'
 import { terrainShaderSupported } from '../layers/terrainSupport'
 import { particlesSupported } from '../layers/particleSupport'
-import { PARTICLES_PER_FLOW, detectGpuTier, perPanelParticleCount } from '../layers/particleBudget'
+import { detectGpuTier, perPanelParticleCount } from '../layers/particleBudget'
 import { usePanelVisibility } from '../hooks/usePanelVisibility'
 import { shaderErrors, type ShaderError } from '../webgl-compat'
 import {
@@ -23,8 +23,15 @@ import {
 } from '../data/odTrips'
 import type { FlowId } from '../data/odTrips'
 import { randomTripSource } from '../data/trips'
-import { TripSchedule, flushSharedTripSchedules, sharedTripSchedule } from '../layers/tripSchedule'
+import {
+  TripSchedule,
+  flushSharedTripSchedules,
+  releaseTripSchedule,
+  retainTripSchedule,
+  sharedTripSchedule,
+} from '../layers/tripSchedule'
 import type { DataSource, GeoPoint, Heightmap } from '../data/types'
+import type { PanelFlow } from './panelSettings'
 import styles from './Dashboard.module.css'
 
 // 200×200 matches the reference; the Seoul mask (point-in-polygon) for it is
@@ -33,12 +40,10 @@ const GRID_SIZE = 200
 
 // Fallback view used before the container has been measured (0×0 during the
 // first render, before layout). The shared INITIAL_VIEW_STATE frames Seoul for a
-// full-screen canvas; inside a bounded panel it reads low, so tighten zoom and
-// drop the center a touch. Once measured, `fitSeoulViewState` replaces this with
-// a size-fitted camera.
+// full-screen canvas; inside a bounded panel it reads small, so tighten zoom.
+// Once measured, `fitSeoulViewState` replaces this with a size-fitted camera.
 const PANEL_VIEW_STATE = {
   ...INITIAL_VIEW_STATE,
-  latitude: 37.535,
   zoom: 10.9,
 }
 
@@ -128,7 +133,6 @@ type Controls = {
   particlesOn: boolean
   particleSpeed: number
   particleTimeScale: number
-  particleCount: number
   particleFade: number
   particleArrivalRamp: number
   particleSize: number
@@ -171,7 +175,6 @@ const DEFAULT_CONTROLS: Controls = {
   // this; real OD flows additionally × their `speedScale` (odTrips.ts).
   particleSpeed: 1250,
   particleTimeScale: 1, // playback multiplier on every trip's duration
-  particleCount: PARTICLES_PER_FLOW, // per flow; ?tune only — the UI keeps it fixed
   particleFade: 0.1, // fade-in window leaving the origin, fraction of the trip (no fade-out)
   particleArrivalRamp: 1, // alpha climbs with progress: faint leaving, bright landing (0 = flat)
   particleSize: 5,
@@ -249,27 +252,30 @@ function RecenterIcon() {
  * panels ("sync views"). A null `camera` means "use the fit".
  *
  * Particles play real OD flows (src/data/odTrips.ts) — one color-coded particle
- * layer per flow switched on in `flows` — from schedules shared by every panel,
- * so all panels show the same particles in lockstep and only the terrain under
- * them differs.
+ * layer per flow with particles in `flows` — from schedules shared page-wide by
+ * (flow, hour window, speed, time scale): panels whose settings match play the
+ * same schedule and move in lockstep, so only the terrain under them differs;
+ * a panel with its own window plays its own.
  */
 export function TerrainPanel({
   source,
   flows,
-  activePanels = 1,
+  activeLayers = 1,
   camera,
   onCameraChange,
   onResetCamera,
 }: {
   source: DataSource
   /**
-   * Particles per OD flow, 0 = off — a dashboard-wide choice, so panels stay
-   * comparable. Capped by the global budget (particleBudget.ts). The `?tune`
-   * "count" knob replaces the number (never the on/off) for the tuned panel.
+   * Per OD flow: how many particles to draw (0 = off — the dashboard derives it
+   * from the trips in this panel's hour window and trips-per-particle; capped
+   * here by the global budget, particleBudget.ts) and that hour window. The
+   * dashboard hands over one stable object per panel; the schedules below are
+   * keyed on it.
    */
-  flows: Record<FlowId, number>
-  /** Live panel count — splits the global particle budget (particleBudget.ts). */
-  activePanels?: number
+  flows: Record<FlowId, PanelFlow>
+  /** Active (panel, flow) layers page-wide — splits the global particle budget. */
+  activeLayers?: number
   camera: PanelCamera | null
   onCameraChange: (camera: PanelCamera) => void
   onResetCamera: () => void
@@ -496,9 +502,8 @@ export function TerrainPanel({
 
       const pt = g.addFolder('particles')
       pt.add(s, 'particlesOn').name('enabled').onChange(sync)
-      // onFinishChange: a new count rebuilds the layer's GPU buffers, so apply it
-      // once the drag settles rather than on every step.
-      pt.add(s, 'particleCount', 50, 4000, 50).name('count (per flow)').onFinishChange(sync)
+      // No trips-per-particle knob here: it is a per-panel setting now, in each
+      // panel's own control strip (PanelControls.tsx).
       pt.add(s, 'particleSpeed', 100, 2000, 50).name('trip speed (m/s)').onChange(sync)
       pt.add(s, 'particleTimeScale', 0.1, 5, 0.1).name('time scale').onChange(sync)
       pt.add(s, 'particleFade', 0, 0.5, 0.01).name('fade in (of trip)').onChange(sync)
@@ -515,9 +520,10 @@ export function TerrainPanel({
       pt.addColor(s, 'migrationColor').name('migration color').onChange(sync)
       pt.add(s, 'particleOpacity', 0, 1, 0.05).name('opacity').onChange(sync)
       // Not a Controls field: endpoint scatter is page-wide state in odTrips.ts
-      // (every panel plays the same trips). 0 = endpoints on the dong centroid,
-      // 1 = the default disc. Flushing the prefetched trips applies it within one
-      // trip's length instead of after the pool drains.
+      // (every panel scatters alike, whatever its window). 0 = endpoints on the
+      // dong centroid, 1 = the default disc. Flushing the prefetched trips of
+      // every schedule on that flow applies it within one trip's length instead
+      // of after the pool drains.
       const od = { scatter: DEFAULT_SCATTER_SCALE }
       pt.add(od, 'scatter', 0, 2, 0.05)
         .name('migration scatter (× radius)')
@@ -533,31 +539,53 @@ export function TerrainPanel({
     }
   }, [])
 
-  // What the particles play: one schedule per real OD flow. Schedules are shared
-  // page-wide per (flow, speed, time scale), so every panel at the same settings
-  // gets the SAME objects and moves in lockstep. A new schedule rebuilds its
-  // particle layer, so they are keyed on those knobs only; the heightmap is needed
-  // just once, for the fallback's Seoul mask (identical across datasets). Nothing
-  // is fetched until a layer actually asks a schedule for slots.
+  // What the particles play: one schedule per OD flow this panel draws. Schedules
+  // are shared page-wide by key `${flow}|${from}-${to}|${speed}|${timeScale}`, so
+  // every panel at the same settings gets the SAME object and moves in lockstep,
+  // while a panel with its own hour window gets its own — a window change is a
+  // new schedule (and a rebuilt particle layer), never a reset of a shared one.
+  // The heightmap is needed just once, for the fallback's Seoul mask (identical
+  // across datasets). Nothing is fetched until a layer actually asks a schedule
+  // for slots. `flows` is the dashboard's stable per-panel record, so this only
+  // re-runs when this panel's settings (or the page-wide totals) change.
   const speed = controls.particleSpeed
   const timeScale = controls.particleTimeScale
   const schedules = useMemo(() => {
     if (!heightmap) return null
     const speedMps: [number, number] = [speed * 0.7, speed * 1.3]
-    return FLOWS.map((flow) => ({
-      flow,
-      schedule: sharedTripSchedule(`${flow.id}|${speed}|${timeScale}`, () => {
-        // Without Supabase only the default-on flow falls back to random trips, so
-        // the site still moves; a second random swarm would just be noise.
-        const fallback = flow.defaultOn ? randomTripSource(heightmap, { speedMps }) : undefined
-        return new TripSchedule(odTripSource(flow, { fallback, speedMps }), timeScale)
-      }),
-    }))
-  }, [heightmap, speed, timeScale])
+    return FLOWS.filter((flow) => flows[flow.id].particles > 0).map((flow) => {
+      const { hours } = flows[flow.id]
+      const key = `${flow.id}|${hours[0]}-${hours[1]}|${speed}|${timeScale}`
+      return {
+        flow,
+        key,
+        schedule: sharedTripSchedule(key, () => {
+          // Without Supabase only the default-on flow falls back to random trips,
+          // so the site still moves; a second random swarm would just be noise.
+          const fallback = flow.defaultOn ? randomTripSource(heightmap, { speedMps }) : undefined
+          return new TripSchedule(
+            odTripSource(flow, { range: hours, fallback, speedMps }),
+            timeScale,
+          )
+        }),
+      }
+    })
+  }, [heightmap, speed, timeScale, flows])
+
+  // Hold the schedules this panel mirrors, and let go when the keys change or the
+  // panel unmounts; the registry disposes a schedule nobody holds after a short
+  // grace. Keyed on the joined string, from an effect: effects balance under
+  // StrictMode's mount → unmount → mount, memos don't.
+  const scheduleKeys = (schedules ?? []).map((s) => s.key).join('\n')
+  useEffect(() => {
+    const keys = scheduleKeys ? scheduleKeys.split('\n') : []
+    keys.forEach(retainTripSchedule)
+    return () => keys.forEach(releaseTripSchedule)
+  }, [scheduleKeys])
 
   const layers = useMemo<Layer[]>(() => {
     if (!heightmap) return []
-    const activeFlows = (schedules ?? []).filter(({ flow }) => flows[flow.id] > 0)
+    const activeFlows = schedules ?? []
     // Flat z=0 reference plate under the terrain: Seoul outline, then parks and
     // river; the contour relief sits on top, with particles above it.
     return [
@@ -585,13 +613,11 @@ export function TerrainPanel({
               id: `particles-${flow.id}-${source.meta.id}`,
               heightmap,
               schedule,
-              // Each flow is its own particle system, so it takes its own budget share.
-              numParticles: perPanelParticleCount(
-                activePanels * activeFlows.length,
-                // `flows` only says on/off here (activeFlows); the number is the
-                // tuner's knob, which starts at the dashboard's PARTICLES_PER_FLOW.
-                controls.particleCount,
-              ),
+              // Each (panel, flow) layer is its own particle system, so it takes
+              // its own share of the global budget; `particles` is what this
+              // panel's window and trips-per-particle ask for. A change rebuilds
+              // the layer's buffers (a window change is a new schedule anyway).
+              numParticles: perPanelParticleCount(activeLayers, flows[flow.id].particles),
               // Same knob as the terrain layer → particles always sit on the surface.
               heightScale: controls.height,
               fadeFraction: controls.particleFade,
@@ -609,7 +635,7 @@ export function TerrainPanel({
           )
         : []),
     ]
-  }, [heightmap, schedules, flows, controls, source.meta.id, particlesOk, animate, activePanels])
+  }, [heightmap, schedules, flows, controls, source.meta.id, particlesOk, animate, activeLayers])
 
   if (webglFailed) {
     return (

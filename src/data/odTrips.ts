@@ -15,21 +15,28 @@ import type { Trip, TripSource } from './trips'
  * The OD tables are far too big to download (bike ~3.45M pair-hours), so the
  * weighted draw happens in Postgres (one `sample_*_hourly` RPC per flow, see
  * supabase/*_hourly_sampling.sql). To keep egress flat the page holds ONE shared
- * reservoir of weighted samples per (flow, hour window); every trip source draws
- * uniformly from the current one (a uniform draw from a weighted sample is still
- * weighted). A small LRU of windows means going back to a window already looked at
- * costs nothing, and one timer per flow slowly refreshes the visible window so the
- * long tail of pairs rotates through.
+ * reservoir of weighted samples per (flow, hour window); every trip source on
+ * that window draws uniformly from it (a uniform draw from a weighted sample is
+ * still weighted). A small LRU of windows means going back to a window already
+ * looked at costs nothing.
  *
- * Each flow carries its OWN time-of-day window — bike at 07–10 against migration
- * at 17–20 is a legitimate comparison — held as module state here, one per flow.
- * Page-wide across panels is the part that matters for the dashboard: every panel
- * reads the same window for a given flow, which is what keeps their swarms in
- * lockstep. The window stays OUT of the schedule key (tripSchedule.ts) all the
- * same: keying schedules by it would tear down every ParticleLayer and blank the
- * swarm on each change. Instead the window is read at `next()` time and only that
- * flow's prefetch pools are flushed, so particles in flight land normally and only
- * the trips after them come from the new window.
+ * Each panel chooses its own time-of-day window per flow — bike 07–10 beside
+ * bike 17–20 is the point of the dashboard — so a trip source is built FOR one
+ * (flow, window) (`OdTripOptions.range`) and the window is part of its schedule's
+ * key (tripSchedule.ts): panels on the same window share one schedule and move in
+ * lockstep, panels on different windows run their own. While a source is alive it
+ * holds a LEASE on its reservoir: the entry is pinned in the LRU, and the first
+ * lease on a window arms that window's one slow refresh timer, which rotates the
+ * long tail of pairs through by overwriting the reservoir in place. The last
+ * `dispose()` clears the timer and the entry becomes an ordinary evictable LRU
+ * item, so re-selecting the window is instant.
+ *
+ * Request volume: the common case is unchanged — every panel on the default
+ * windows shares one reservoir per flow that is on (one refresh RPC a minute
+ * page-wide with only living migration on, two with bike on too). The worst
+ * case, 6 panels × 2 flows on 12 distinct windows, is 12 refresh RPCs a minute
+ * with ~60k legs resident; the 5-batch loads themselves only ever happen once per
+ * window while it stays in the LRU.
  *
  * Places (station / dong coordinates) are hour-independent, so they are paginated
  * once per flow per page load and shared by every window.
@@ -56,14 +63,31 @@ export interface OdFlow {
    * trips when Supabase is unavailable, so the default view is never motionless.
    */
   defaultOn: boolean
-  /** Where the OD endpoints live: `placeId`, `lat`, `lon` columns. */
-  placeTable: string
-  placeId: string
+  /**
+   * Where the OD endpoints live — either a Supabase table with `id`, `lat`, `lon`
+   * columns (paginated once), or a static JSON file of `{ id, lat, lon }[]` under
+   * `public/` (a few hundred rows is not worth a table, a user decision).
+   */
+  places: { table: string; id: string } | { url: string }
   /**
    * `(n int, hour_from int, hour_to int) → { o, d }[]` place-id pairs drawn
    * ∝ trips within the half-open hour window, n ≤ 1000.
    */
   sampleRpc: string
+  /**
+   * `(hour int, total numeric)`, 24 rows: the weight of each hour — the very
+   * totals `sampleRpc` draws against, so the particle count and the OD mix can
+   * never disagree about what a window contains.
+   */
+  totalsTable: string
+  /**
+   * How many trips one particle stands for. Per flow, because the two datasets
+   * count in different units (bike = accumulated rentals, migration = estimated
+   * people) — the defaults are tuned so the 07–10 window draws ~400 of each.
+   */
+  tripsPerParticle: number
+  /** What the totals count, for each panel's scale line: "1 particle ≈ 15,000 <unit>". */
+  tripUnit: string
   /**
    * Places are area centroids, not points: scatter each endpoint around its
    * centroid so trips between two dongs don't all ride one identical line.
@@ -85,9 +109,11 @@ export const FLOWS: readonly OdFlow[] = [
     label: 'Bike trips (따릉이)',
     color: '#f4f4f4', // near-white — legible on both the cyan and the red end of the ramp
     defaultOn: false,
-    placeTable: 'bike_station',
-    placeId: 'station_no',
+    places: { table: 'bike_station', id: 'station_no' },
     sampleRpc: 'sample_bike_od_hourly',
+    totalsTable: 'bike_od_hourly_totals',
+    tripsPerParticle: 15_000,
+    tripUnit: 'trips',
     scatter: false,
     speedScale: 0.6,
     minDistanceMeters: 300,
@@ -97,9 +123,13 @@ export const FLOWS: readonly OdFlow[] = [
     label: 'Living migration (생활이동)',
     color: '#f1c21b', // Carbon Yellow 30 — the one hue far from cyan, red and white
     defaultOn: true,
-    placeTable: 'living_migration_adm_dong',
-    placeId: 'admdong_cd',
+    // 426 dong representative points (행안부 admdong_cd → lat/lon), built by
+    // particle-generator/notebooks/living_migration_od.ipynb; shipped static.
+    places: { url: `${import.meta.env.BASE_URL}data/living-migration-dongs.json` },
     sampleRpc: 'sample_living_migration_hourly',
+    totalsTable: 'living_migration_hourly_totals',
+    tripsPerParticle: 8_000,
+    tripUnit: 'trips',
     scatter: true,
     speedScale: 0.6,
     minDistanceMeters: 300,
@@ -120,28 +150,10 @@ function clampHourRange(from: number, to: number): HourRange {
 }
 
 /**
- * Move one flow's window. Returns true only when it actually moved, so the caller
- * knows whether to flush that flow's schedules — and so a repeated (or
- * StrictMode-doubled) call with the same hours is a no-op. `stateFor` keys by id,
- * so the window can be set before this flow has ever loaded a reservoir.
- */
-export function setOdHourRange(flowId: FlowId, from: number, to: number): boolean {
-  const state = stateFor(flowId)
-  const next = clampHourRange(from, to)
-  if (next[0] === state.range[0] && next[1] === state.range[1]) return false
-  state.range = next
-  return true
-}
-
-export function getOdHourRange(flowId: FlowId): HourRange {
-  return stateFor(flowId).range
-}
-
-/**
  * Multiplier on every scattered place's disc radius (`OdFlow.scatter`): 1 is the
  * half-nearest-centroid disc, 0 pins each endpoint to its centroid so all trips
- * between two dongs ride one line. Page-wide like the hour windows — every panel
- * plays the same trips — and a dev knob only (`?tune`).
+ * between two dongs ride one line. Page-wide — every panel scatters alike — and a
+ * dev knob only (`?tune`); a change flushes the schedules' prefetch pools.
  *
  * Default 0 (user decision): dong-to-dong flows read as clean lines between
  * centroids rather than a haze, and the corridors that carry the most trips
@@ -181,25 +193,40 @@ interface Leg {
 
 type Places = Map<number, Place>
 
+type PlaceRow = { id: number; lat: number; lon: number }
+
+/** Every place row of the flow, from its table (paginated) or its static file. */
+async function loadPlaceRows(client: SupabaseClient, flow: OdFlow): Promise<PlaceRow[]> {
+  if ('url' in flow.places) {
+    const res = await fetch(flow.places.url)
+    if (!res.ok) throw new Error(`${flow.places.url}: ${res.status} ${res.statusText}`)
+    return (await res.json()) as PlaceRow[]
+  }
+  const { table, id } = flow.places
+  const rows: PlaceRow[] = []
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await client
+      .from(table)
+      .select(`id:${id}, lat, lon`)
+      .order(id)
+      .range(from, from + PAGE_SIZE - 1)
+    if (error) throw error
+    const page = data as unknown as PlaceRow[]
+    rows.push(...page)
+    if (page.length < PAGE_SIZE) break
+  }
+  return rows
+}
+
 async function loadPlaces(client: SupabaseClient, flow: OdFlow): Promise<Places> {
   const [minLng, minLat, maxLng, maxLat] = SEOUL_BOUNDS
   const places: Places = new Map()
-  for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await client
-      .from(flow.placeTable)
-      .select(`id:${flow.placeId}, lat, lon`)
-      .order(flow.placeId)
-      .range(from, from + PAGE_SIZE - 1)
-    if (error) throw error
-    const rows = data as unknown as { id: number; lat: number; lon: number }[]
-    for (const { id, lat, lon } of rows) {
-      // Trip endpoints are never clamped downstream (lngLatToUv), so a place
-      // outside the bounds would draw its particle off the terrain.
-      if (lon >= minLng && lon <= maxLng && lat >= minLat && lat <= maxLat) {
-        places.set(id, { center: [lon, lat], radius: 0 })
-      }
+  for (const { id, lat, lon } of await loadPlaceRows(client, flow)) {
+    // Trip endpoints are never clamped downstream (lngLatToUv), so a place
+    // outside the bounds would draw its particle off the terrain.
+    if (lon >= minLng && lon <= maxLng && lat >= minLat && lat <= maxLat) {
+      places.set(id, { center: [lon, lat], radius: 0 })
     }
-    if (rows.length < PAGE_SIZE) break
   }
   if (flow.scatter) {
     // No polygons or areas in the table, so size each dong by its spacing: half
@@ -237,18 +264,25 @@ async function sampleLegs(
   return legs
 }
 
+/**
+ * The live sources on one (flow, hour window): how many, and the window's one
+ * refresh timer, which runs exactly while `refs` > 0.
+ */
+interface Lease {
+  refs: number
+  timer: ReturnType<typeof setInterval>
+}
+
 /** Everything the page keeps per flow. One instance, created on first use. */
 interface FlowState {
-  /** This flow's own time-of-day window — the one every panel samples it in. */
-  range: HourRange
   /** Endpoint coordinates — hour-independent, so paginated once and reused. */
   places: Promise<Places> | null
+  /** Trips per hour of day (length 24), fetched once; resolves null when unavailable. */
+  totals: Promise<number[] | null> | null
   /** Reservoir per hour window, keyed `${from}-${to}`, used as an LRU. */
   reservoirs: Map<string, Promise<Leg[] | null>>
-  /** The most recent reservoir that actually loaded — what a failed window falls back to. */
-  live: Leg[] | null
-  /** The one slow-refresh interval, armed by the first reservoir that loaded. */
-  timer: ReturnType<typeof setInterval> | null
+  /** Windows some live source is sampling — pinned in the LRU, each with its refresh timer. */
+  leases: Map<string, Lease>
   /** Whether this flow has already printed its one console status line. */
   announced: boolean
   /** Sticky: Supabase can't supply this flow at all this page load. */
@@ -258,18 +292,17 @@ interface FlowState {
 const states = new Map<FlowId, FlowState>()
 
 /**
- * Keyed by id, not by `OdFlow`, so the hour setter can create a flow's state
+ * Keyed by id, not by `OdFlow`, so the totals loader can create a flow's state
  * before anything has asked it for trips.
  */
 function stateFor(flowId: FlowId): FlowState {
   let state = states.get(flowId)
   if (!state) {
     state = {
-      range: DEFAULT_HOUR_RANGE,
       places: null,
+      totals: null,
       reservoirs: new Map(),
-      live: null,
-      timer: null,
+      leases: new Map(),
       announced: false,
       failed: false,
     }
@@ -289,7 +322,10 @@ function placesFor(state: FlowState, client: SupabaseClient, flow: OdFlow): Prom
     const loading = (async () => {
       const places = await loadPlaces(client, flow)
       // An RLS-blocked table answers 200 with zero rows, not an error.
-      if (places.size === 0) throw new Error(`${flow.placeTable} returned no rows (RLS policy?)`)
+      if (places.size === 0) {
+        const where = 'url' in flow.places ? flow.places.url : `${flow.places.table} (RLS policy?)`
+        throw new Error(`${where} returned no places`)
+      }
       return places
     })()
     state.places = loading
@@ -301,42 +337,134 @@ function placesFor(state: FlowState, client: SupabaseClient, flow: OdFlow): Prom
 }
 
 /**
- * One slow refresh timer per flow: every tick it samples fresh legs for whichever
- * window this flow is showing *now* — read at tick time, so a slider move needs no
- * re-arming — and overwrites random entries of that reservoir IN PLACE: trip
- * sources hold the array itself, so it must never be swapped out.
+ * Trips per hour of day for one flow — 24 numbers, one request per flow per page
+ * load. Never rejects: `null` means the count can't be derived (no Supabase env,
+ * the view is unreadable, or it answered empty) and the caller keeps its fixed
+ * fallback count. A failure is not cached, so a later call retries.
  */
-function armRefresh(state: FlowState, client: SupabaseClient, flow: OdFlow): void {
-  if (state.timer !== null) return
-  state.timer = setInterval(() => {
-    if (document.hidden) return
-    const range = state.range
-    const key = rangeKey(range)
-    const cached = state.reservoirs.get(key)
-    const places = state.places
-    if (!cached || !places) return
-    void (async () => {
+export function loadOdHourTotals(flowId: FlowId): Promise<number[] | null> {
+  const state = stateFor(flowId)
+  if (!state.totals) {
+    const flow = FLOW_BY_ID[flowId]
+    const loading: Promise<number[] | null> = (async () => {
+      // Off the synchronous path, so a failure's `state.totals = null` always
+      // lands after the assignment below and the next call retries.
+      await Promise.resolve()
       try {
-        const legs = await cached
-        if (!legs || legs.length === 0) return
-        const fresh = await sampleLegs(client, flow, await places, range)
-        // The window may have moved on (or this entry been evicted) while the
-        // request was in flight — those legs belong to a reservoir nobody holds.
-        if (state.reservoirs.get(key) !== cached) return
-        for (const leg of fresh) legs[Math.floor(Math.random() * legs.length)] = leg
-      } catch {
-        // Keep playing the reservoir we have.
+        const client = await getSupabase()
+        if (!client) return null
+        const { data, error } = await client.from(flow.totalsTable).select('hour, total')
+        if (error) throw error
+        const totals = new Array<number>(24).fill(0)
+        let any = false
+        for (const { hour, total } of data as unknown as { hour: number; total: number }[]) {
+          if (hour >= 0 && hour < 24 && total > 0) {
+            totals[hour] = Number(total)
+            any = true
+          }
+        }
+        if (!any) throw new Error(`${flow.totalsTable} returned no rows (grant / RLS?)`)
+        return totals
+      } catch (err) {
+        console.debug(`[urban-flow] Supabase (${flow.id}): hour totals unavailable —`, err)
+        state.totals = null
+        return null
       }
     })()
-  }, REFRESH_MS)
+    state.totals = loading
+  }
+  return state.totals
 }
 
-/** Trim the LRU, never the window just touched (Map order = insertion order). */
+/** Trips inside the half-open window — the sum of its hours. */
+export function tripsInWindow(totals: readonly number[], range: HourRange): number {
+  let sum = 0
+  for (let h = range[0]; h < range[1]; h++) sum += totals[h] ?? 0
+  return sum
+}
+
+/**
+ * Particles for a window at "one particle = `tripsPerParticle` trips". At least
+ * one while the window has any trips at all, so a quiet hour reads as quiet
+ * rather than as a flow that failed to load.
+ */
+export function particlesForWindow(
+  totals: readonly number[],
+  range: HourRange,
+  tripsPerParticle: number,
+): number {
+  const trips = tripsInWindow(totals, range)
+  if (trips <= 0) return 0
+  return Math.max(1, Math.round(trips / Math.max(1, tripsPerParticle)))
+}
+
+/**
+ * One refresh tick for a (flow, window): sample a fresh batch and overwrite
+ * random entries of the loaded reservoir IN PLACE — trip sources hold the array
+ * itself, so it must never be swapped out. Skipped while the tab is hidden, while
+ * the reservoir hasn't loaded (or loaded empty / failed), and thrown away if the
+ * entry was replaced or evicted while the request was in flight — those legs
+ * belong to a reservoir nobody holds. Never throws.
+ */
+function refreshReservoir(state: FlowState, flow: OdFlow, key: string, range: HourRange): void {
+  if (document.hidden) return
+  const cached = state.reservoirs.get(key)
+  const places = state.places
+  if (!cached || !places) return
+  void (async () => {
+    try {
+      const client = await getSupabase()
+      if (!client) return
+      const legs = await cached
+      if (!legs || legs.length === 0) return
+      const fresh = await sampleLegs(client, flow, await places, range)
+      if (state.reservoirs.get(key) !== cached) return
+      for (const leg of fresh) legs[Math.floor(Math.random() * legs.length)] = leg
+    } catch {
+      // Keep playing the reservoir we have.
+    }
+  })()
+}
+
+/**
+ * A source built for `range` is alive: pin the window in the LRU and, for the
+ * first one, arm the window's refresh timer. Later sources on the same window
+ * (other panels in lockstep) just count. Balanced by `releaseLease`.
+ */
+function acquireLease(state: FlowState, flow: OdFlow, range: HourRange): void {
+  const key = rangeKey(range)
+  const lease = state.leases.get(key)
+  if (lease) {
+    lease.refs += 1
+    return
+  }
+  const timer = setInterval(() => refreshReservoir(state, flow, key, range), REFRESH_MS)
+  state.leases.set(key, { refs: 1, timer })
+}
+
+/**
+ * A source on `key` was disposed. The last one clears the timer; the reservoir
+ * stays cached as an ordinary evictable LRU entry, so coming back is instant.
+ */
+function releaseLease(state: FlowState, key: string): void {
+  const lease = state.leases.get(key)
+  if (!lease) return
+  lease.refs -= 1
+  if (lease.refs > 0) return
+  clearInterval(lease.timer)
+  state.leases.delete(key)
+}
+
+/**
+ * Trim the LRU: never the window just touched, never a leased one (a live source
+ * holds its array). Map order = insertion order, so the first eligible key is
+ * the least recently used.
+ */
 function evict(state: FlowState, keep: string): void {
   while (state.reservoirs.size > RESERVOIR_CACHE) {
     let oldest: string | undefined
     for (const key of state.reservoirs.keys()) {
-      if (key !== keep) {
+      if (key !== keep && !state.leases.has(key)) {
         oldest = key
         break
       }
@@ -348,9 +476,11 @@ function evict(state: FlowState, keep: string): void {
 
 /**
  * The shared reservoir for one (flow, hour window), loaded at most once while it
- * stays in the LRU; `null` = Supabase can't supply it. Never rejects, and never
- * resolves empty after a successful connect: a window that fails to load keeps the
- * previous one playing instead of stalling the swarm.
+ * stays in the LRU. Never rejects. `null` = Supabase can't supply this flow at
+ * all (first failure, sticky for the page); `[]` = the flow connected but this
+ * window failed to load — the key is forgotten so asking again retries, and the
+ * source answers an empty batch, which parks its schedule. Refreshing is the
+ * window's lease's business (`acquireLease`), not this loader's.
  */
 function reservoirFor(flow: OdFlow, range: HourRange): Promise<Leg[] | null> {
   const state = stateFor(flow.id)
@@ -391,7 +521,6 @@ function reservoirFor(flow: OdFlow, range: HourRange): Promise<Leg[] | null> {
       )
       const legs = batches.flat()
       if (legs.length === 0) throw new Error(`${flow.sampleRpc} returned no usable pairs`)
-      state.live = legs
       if (!state.announced) {
         state.announced = true
         console.info(
@@ -401,7 +530,6 @@ function reservoirFor(flow: OdFlow, range: HourRange): Promise<Leg[] | null> {
       } else {
         console.debug(`${tag} ${key}h — ${legs.length} weighted OD samples`)
       }
-      armRefresh(state, client, flow)
       return legs
     } catch (err) {
       if (!state.announced) {
@@ -411,10 +539,11 @@ function reservoirFor(flow: OdFlow, range: HourRange): Promise<Leg[] | null> {
         return null
       }
       // Already connected once, so this is the window's problem, not the flow's:
-      // forget it (re-selecting retries) and keep the last loaded one playing.
-      console.debug(`${tag} ${key}h unavailable, keeping the previous window —`, err)
+      // forget it (asking again retries) and answer empty, which parks the
+      // sources on this window rather than showing them some other window's trips.
+      console.debug(`${tag} ${key}h unavailable —`, err)
       if (state.reservoirs.get(key) === loading) state.reservoirs.delete(key)
-      return state.live
+      return []
     }
   })()
   state.reservoirs.set(key, loading)
@@ -423,6 +552,13 @@ function reservoirFor(flow: OdFlow, range: HourRange): Promise<Leg[] | null> {
 }
 
 export interface OdTripOptions {
+  /**
+   * The time-of-day window this source samples in, fixed for its lifetime — a
+   * panel that changes window builds a new source (and schedule). Clamped to
+   * whole hours in [0, 24) / (from, 24], never wrapped. The source leases the
+   * window's reservoir until `dispose()`.
+   */
+  range: HourRange
   /**
    * Supplies trips when Supabase is unconfigured or unreachable. Without one the
    * source returns nothing and the flow simply doesn't draw.
@@ -434,15 +570,23 @@ export interface OdTripOptions {
 }
 
 /**
- * Trips sampled from a flow's real OD pairs, in whatever time-of-day window that
- * flow is set to when the batch is requested. Never rejects — TripQueue retries a
- * rejecting source forever — so any failure is handed to `fallback`, or answered
- * with an empty batch (which parks the flow for this page load).
+ * Trips sampled from a flow's real OD pairs in one time-of-day window. Never
+ * rejects — TripQueue retries a rejecting source forever. When Supabase can't
+ * supply the flow at all, batches come from `fallback` (or are empty); when just
+ * this window fails to load after a successful connect, the batch is empty, which
+ * parks the schedule — re-selecting the window builds a new source and retries.
+ *
+ * `dispose()` releases the reservoir lease; idempotent, and called once by the
+ * schedule that plays this source when its last panel lets go.
  */
-export function odTripSource(flow: OdFlow, opts: OdTripOptions = {}): TripSource {
+export function odTripSource(flow: OdFlow, opts: OdTripOptions): TripSource {
   const { fallback, seed = 0x5e0e1, speedMps = [500, 900] } = opts
   const rand = mulberry32(seed)
   const [minLng, minLat, maxLng, maxLat] = SEOUL_BOUNDS
+  const state = stateFor(flow.id)
+  const range = clampHourRange(opts.range[0], opts.range[1])
+  acquireLease(state, flow, range)
+  let disposed = false
 
   /** A point for this endpoint: the place itself, or uniform in its disc. */
   const locate = (place: Place): [number, number] => {
@@ -456,11 +600,9 @@ export function odTripSource(flow: OdFlow, opts: OdTripOptions = {}): TripSource
 
   return {
     next: async (count) => {
-      // Read this flow's window at call time, not at construction: the source
-      // outlives every change to it, and the pool it feeds was flushed for
-      // exactly this.
-      const legs = await reservoirFor(flow, stateFor(flow.id).range)
-      if (!legs || legs.length === 0) return fallback ? fallback.next(count) : []
+      const legs = await reservoirFor(flow, range)
+      if (legs === null) return fallback ? fallback.next(count) : []
+      if (legs.length === 0) return []
       return Array.from({ length: count }, (): Trip => {
         let origin: [number, number]
         let destination: [number, number]
@@ -475,6 +617,11 @@ export function odTripSource(flow: OdFlow, opts: OdTripOptions = {}): TripSource
         const speed = (speedMps[0] + rand() * (speedMps[1] - speedMps[0])) * flow.speedScale
         return { origin, destination, durationSec: meters / speed }
       })
+    },
+    dispose: () => {
+      if (disposed) return
+      disposed = true
+      releaseLease(state, rangeKey(range))
     },
   }
 }
